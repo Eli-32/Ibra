@@ -131,11 +131,11 @@ async function startBot() {
   const sock = makeWASocket({
     auth: state,
     printQRInTerminal: false,
-    logger: pino({ level: 'silent' }),
+    logger: pino({ level: 'error' }),
     browser: ['Anime Detector Bot', 'Chrome', '1.0.0'],
-    defaultQueryTimeoutMs: 60000,
-    connectTimeoutMs: 60000,
-    keepAliveIntervalMs: 10000,
+    defaultQueryTimeoutMs: 120000,
+    connectTimeoutMs: 120000,
+    keepAliveIntervalMs: 20000,
     markOnlineOnConnect: true,
   });
 
