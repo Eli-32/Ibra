@@ -186,6 +186,11 @@ async function startBot() {
             console.log(`📊 Status: ${status.status} | Characters learned: ${status.charactersLearned}`);
           }
         }, 300000); // Every 5 minutes
+
+        // Add a heartbeat log to confirm the bot is running
+        setInterval(() => {
+          console.log(`❤️ Bot heartbeat at ${new Date().toISOString()}`);
+        }, 60000); // Every 1 minute
       } else {
         console.error('❌ Failed to load anime bot plugin');
       }
@@ -202,7 +207,7 @@ let isShuttingDown = false;
 process.on('SIGINT', () => {
   if (!isShuttingDown) {
     isShuttingDown = true;
-    console.log('\n⚠️ Received SIGINT, shutting down gracefully...');
+    console.log(`\n⚠️ Received SIGINT at ${new Date().toISOString()}, shutting down gracefully...`);
     if (currentAnimeBot) {
       currentAnimeBot.cleanup();
     }
@@ -213,7 +218,7 @@ process.on('SIGINT', () => {
 process.on('SIGTERM', () => {
   if (!isShuttingDown) {
     isShuttingDown = true;
-    console.log('\n⚠️ Received SIGTERM, shutting down gracefully...');
+    console.log(`\n⚠️ Received SIGTERM at ${new Date().toISOString()}, shutting down gracefully...`);
     if (currentAnimeBot) {
       currentAnimeBot.cleanup();
     }
@@ -222,19 +227,19 @@ process.on('SIGTERM', () => {
 });
 
 process.on('uncaughtException', (err) => {
-  console.error('❌ Uncaught Exception:', err);
+  console.error(`❌ Uncaught Exception at ${new Date().toISOString()}:`, err);
   // Don't exit immediately, try to recover
   if (currentAnimeBot) {
     currentAnimeBot.cleanup();
   }
   setTimeout(() => {
-    console.log('🔄 Attempting to restart bot...');
+    console.log('🔄 Attempting to restart bot after uncaught exception...');
     startBot().catch(console.error);
   }, 5000);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+  console.error(`❌ Unhandled Rejection at ${new Date().toISOString()} - Promise:`, promise, 'Reason:', reason);
   // Don't exit, just log the error
 });
 
