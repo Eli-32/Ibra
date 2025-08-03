@@ -7,6 +7,10 @@ import express from 'express';
 
 // Global variable to store the current bot instance
 let currentAnimeBot = null;
+let retryCount = 0;
+const maxRetries = 3;
+let lastRetryTime = 0;
+const minRetryInterval = 30000; // 30 seconds minimum between retries
 
 // Create Express server
 const app = express();
@@ -18,6 +22,7 @@ app.get('/', (req, res) => {
   res.json({
     status: 'online',
     botStatus: status,
+    retryCount: retryCount,
     timestamp: new Date().toISOString()
   });
 });
@@ -121,84 +126,127 @@ function setupHotReload(sock) {
 }
 
 async function startBot() {
+  // Check if we should retry based on time and count
+  const now = Date.now();
+  if (retryCount > 0) {
+    if (now - lastRetryTime < minRetryInterval) {
+      console.log(`⏳ Too soon to retry. Waiting ${Math.ceil((minRetryInterval - (now - lastRetryTime)) / 1000)} seconds...`);
+      setTimeout(startBot, minRetryInterval - (now - lastRetryTime));
+      return;
+    }
+    
+    if (retryCount >= maxRetries) {
+      console.log('❌ Max retries reached. Please check your connection and try again later.');
+      console.log('💡 Try clearing session with: rm -rf ./AnimeSession && npm start');
+      process.exit(1);
+    }
+  }
+  
+  lastRetryTime = now;
+  retryCount++;
+  
   // Clean up old session files
   await cleanupSession();
   
-  // Use multi-file auth state
-  const { state, saveCreds } = await useMultiFileAuthState('./AnimeSession');
-  
-  // Create WhatsApp socket with better configuration
-  const sock = makeWASocket({
-    auth: state,
-    printQRInTerminal: false,
-    logger: pino({ level: 'error' }),
-    browser: ['Anime Detector Bot', 'Chrome', '1.0.0'],
-    defaultQueryTimeoutMs: 120000,
-    connectTimeoutMs: 120000,
-    keepAliveIntervalMs: 20000,
-    markOnlineOnConnect: true,
-  });
-
-  // Handle QR code
-  sock.ev.on('connection.update', async (update) => {
-    const { connection, lastDisconnect, qr } = update;
+  try {
+    // Use multi-file auth state
+    const { state, saveCreds } = await useMultiFileAuthState('./AnimeSession');
     
-    if (qr) {
-      console.log('📱 Scan this QR code with your WhatsApp:');
-      qrcode.generate(qr, { small: true });
-    }
+    // Create WhatsApp socket with better configuration
+    const sock = makeWASocket({
+      auth: state,
+      printQRInTerminal: false,
+      logger: pino({ level: 'error' }),
+      browser: ['Anime Detector Bot', 'Chrome', '1.0.0'],
+      defaultQueryTimeoutMs: 60000, // Reduced from 120000
+      connectTimeoutMs: 60000, // Reduced from 120000
+      keepAliveIntervalMs: 30000, // Increased from 20000
+      markOnlineOnConnect: false, // Changed to false to reduce suspicion
+      retryRequestDelayMs: 2000, // Add delay between retries
+      maxRetries: 1, // Reduce max retries
+      // Add connection stability settings
+      shouldIgnoreJid: jid => jid.includes('@broadcast'),
+      fireInitQueries: false,
+      emitOwnEvents: false
+    });
+
+    // Handle QR code
+    sock.ev.on('connection.update', async (update) => {
+      const { connection, lastDisconnect, qr } = update;
+      
+      if (qr) {
+        console.log('📱 Scan this QR code with your WhatsApp:');
+        qrcode.generate(qr, { small: true });
+      }
+      
+      if (connection === 'close') {
+        const reason = lastDisconnect?.error?.output?.statusCode;
+        const shouldReconnect = reason !== DisconnectReason.loggedOut;
+        
+        console.log(`❌ Connection closed due to: ${reason}`);
+        
+        if (reason === 403 || reason === 503) {
+          console.log('🚫 Rate limited or blocked by WhatsApp. Waiting longer before retry...');
+          const waitTime = Math.min(60000 * retryCount, 300000); // 1-5 minutes
+          console.log(`⏳ Waiting ${waitTime / 1000} seconds before retry...`);
+          setTimeout(startBot, waitTime);
+        } else if (shouldReconnect) {
+          const waitTime = Math.min(10000 * retryCount, 60000); // 10-60 seconds
+          console.log(`🔄 Reconnecting in ${waitTime / 1000} seconds...`);
+          setTimeout(startBot, waitTime);
+        } else {
+          console.log('🚫 Logged out. Please restart and scan QR code again.');
+          process.exit(1);
+        }
+      } else if (connection === 'open') {
+        retryCount = 0; // Reset retry count on successful connection
+        console.log('✅ Connected to WhatsApp successfully!');
+        console.log(`👤 Logged in as: ${sock.user?.name || 'Unknown'}`);
+        console.log(`📱 Phone: ${sock.user?.id?.split(':')[0] || 'Unknown'}`);
+        
+        // Load and initialize the anime bot
+        const pluginModule = await loadAnimeBot();
+        if (pluginModule) {
+          const { WhatsAppAnimeBot } = pluginModule;
+          currentAnimeBot = new WhatsAppAnimeBot(sock);
+          
+          console.log('🤖 Anime Character Detector initialized!');
+          console.log('📝 Commands:');
+          console.log('   .a - Activate anime detection');
+          console.log('   .x - Deactivate anime detection');
+          console.log('💡 Usage: Send text between *asterisks* to detect characters');
+          console.log('   Example: *غوكو ضد فيجيتا*');
+          
+          // Setup hot-reload
+          setupHotReload(sock);
+          
+          // Log learning stats periodically
+          setInterval(() => {
+            if (currentAnimeBot) {
+              const status = currentAnimeBot.getStatus();
+              console.log(`📊 Status: ${status.status} | Characters learned: ${status.charactersLearned}`);
+            }
+          }, 300000); // Every 5 minutes
+
+          // Add a heartbeat log to confirm the bot is running
+          setInterval(() => {
+            console.log(`❤️ Bot heartbeat at ${new Date().toISOString()}`);
+          }, 60000); // Every 1 minute
+        } else {
+          console.error('❌ Failed to load anime bot plugin');
+        }
+      }
+    });
+
+    // Save credentials when updated
+    sock.ev.on('creds.update', saveCreds);
     
-    if (connection === 'close') {
-      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log('❌ Connection closed due to:', lastDisconnect?.error?.output?.statusCode || 'Unknown');
-      
-      if (shouldReconnect) {
-        console.log('🔄 Reconnecting in 3 seconds...');
-        setTimeout(startBot, 3000);
-      } else {
-        console.log('🚫 Logged out. Please restart and scan QR code again.');
-      }
-    } else if (connection === 'open') {
-      console.log('✅ Connected to WhatsApp successfully!');
-      console.log(`👤 Logged in as: ${sock.user?.name || 'Unknown'}`);
-      console.log(`📱 Phone: ${sock.user?.id?.split(':')[0] || 'Unknown'}`);
-      
-      // Load and initialize the anime bot
-      const pluginModule = await loadAnimeBot();
-      if (pluginModule) {
-        const { WhatsAppAnimeBot } = pluginModule;
-        currentAnimeBot = new WhatsAppAnimeBot(sock);
-        
-        console.log('🤖 Anime Character Detector initialized!');
-        console.log('📝 Commands:');
-        console.log('   .a - Activate anime detection');
-        console.log('   .x - Deactivate anime detection');
-        console.log('💡 Usage: Send text between *asterisks* to detect characters');
-        console.log('   Example: *غوكو ضد فيجيتا*');
-        
-        // Setup hot-reload
-        setupHotReload(sock);
-        
-        // Log learning stats periodically
-        setInterval(() => {
-          if (currentAnimeBot) {
-            const status = currentAnimeBot.getStatus();
-            console.log(`📊 Status: ${status.status} | Characters learned: ${status.charactersLearned}`);
-          }
-        }, 300000); // Every 5 minutes
-
-        // Add a heartbeat log to confirm the bot is running
-        setInterval(() => {
-          console.log(`❤️ Bot heartbeat at ${new Date().toISOString()}`);
-        }, 60000); // Every 1 minute
-      } else {
-        console.error('❌ Failed to load anime bot plugin');
-      }
-    }
-  });
-
-  // Save credentials when updated
-  sock.ev.on('creds.update', saveCreds);
+  } catch (error) {
+    console.error('❌ Error in startBot:', error);
+    const waitTime = Math.min(30000 * retryCount, 120000); // 30 seconds to 2 minutes
+    console.log(`🔄 Retrying in ${waitTime / 1000} seconds...`);
+    setTimeout(startBot, waitTime);
+  }
 }
 
 // Anti-shutdown protection and graceful handling

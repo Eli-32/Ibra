@@ -59,27 +59,28 @@ class AnimeCharacterBot {
     }
 
     getAdaptiveDelay(characterCount = 1, isMistake = false, mistakeType = null) {
-        const baseDelay = 650; // Base delay for 1 character (10% faster: 722 * 0.9)
-        const perCharacterDelay = 650; // Each additional character adds this much time (10% faster: 722 * 0.9)
-        const randomVariation = Math.floor(Math.random() * 500); // Random variation
+        // ULTRA FAST MODE - 180 WPM
+        const baseDelay = 50; // Super fast base delay (was 650)
+        const perCharacterDelay = 25; // Minimal delay per character (was 650)
+        const randomVariation = Math.floor(Math.random() * 100); // Reduced random variation (was 500)
         let calculatedDelay = baseDelay + ((characterCount - 1) * perCharacterDelay) + randomVariation;
         
         // If it's a delay mistake, make it much longer
         if (isMistake && mistakeType === 'delay_mistake') {
-            calculatedDelay *= 3; // 3x longer for delay mistakes
+            calculatedDelay *= 2; // Reduced from 3x to 2x
         }
         
         return calculatedDelay;
     }
 
-    // 30% chance of making a mistake in processing
+    // 10% chance of making a mistake in processing (reduced from 30%)
     shouldMakeMistake() {
-        return Math.random() < 0.3; // 30% chance
+        return Math.random() < 0.1; // 10% chance
     }
 
-    // 50% chance of correcting a mistake after a delay
+    // 70% chance of correcting a mistake after a delay (increased from 50%)
     shouldCorrectMistake() {
-        return Math.random() < 0; // 50% chance
+        return Math.random() < 0.7; // 70% chance
     }
 
     // Generate correction message - simple and direct
@@ -181,14 +182,14 @@ class AnimeCharacterBot {
             else if (apiUrl.includes('kitsu.io')) searchUrl = `${apiUrl}?filter[name]=${encodeURIComponent(characterName)}&page[limit]=1`;
             else if (apiUrl.includes('anilist.co')) {
                 const query = "query ($search: String) { Character(search: $search) { name { full native } id } }";
-                const response = await axios.post(apiUrl, { query, variables: { search: characterName } }, { timeout: 660 });
+                const response = await axios.post(apiUrl, { query, variables: { search: characterName } }, { timeout: 3000 }); // Reduced timeout from 660
                 if (response.data?.data?.Character) {
                     const char = response.data.data.Character;
                     return { name: char.name.full || char.name.native, confidence: 0.9, source: 'AniList' };
                 }
                 return null;
             }
-            const response = await axios.get(searchUrl, { timeout: 660, headers: { 'User-Agent': 'AnimeBot/1.0' } });
+            const response = await axios.get(searchUrl, { timeout: 3000, headers: { 'User-Agent': 'AnimeBot/1.0' } }); // Reduced timeout from 660
             if (response.data?.data?.[0]?.attributes) {
                 const attrs = response.data.data[0].attributes;
                 return { name: attrs.name || attrs.canonicalName, confidence: 0.8, source: apiUrl.split('/')[2] };
@@ -196,7 +197,7 @@ class AnimeCharacterBot {
         } catch (error) { 
             // Rate limit protection - exponential backoff
             if (error.response?.status === 429) {
-                const retryAfter = parseInt(error.response.headers['retry-after']) || 60;
+                const retryAfter = parseInt(error.response.headers['retry-after']) || 30; // Reduced from 60
                 await this.sleep(retryAfter * 1000);
             }
         }
@@ -371,15 +372,22 @@ class AnimeCharacterBot {
 
 // WhatsApp Bot Integration for Baileys
 class WhatsAppAnimeBot {
-    constructor(sock) {
+    constructor(sock, config = null) {
         this.sock = sock;
         this.animeBot = new AnimeCharacterBot();
         this.isActive = false; // Bot starts as inactive by default
         this.selectedGroup = null; // Selected group to work in
-        this.ownerNumbers = ['96176337375','966584646464','967771654273','967739279014']; // Add owner phone numbers here
+        this.activationTimestamp = null; // Timestamp for when the bot is activated
+        this.ownerNumbers = config?.bot?.ownerNumbers || ['96176337375','966584646464','967771654273','967739279014'];
         this.messageHandler = null;
         this.processedMessages = new Set();
-        this.lastMessageTimestamp = 0; // Track the most recent message timestamp
+        this.messageProcessingQueue = new Map(); // Track processing messages
+        this.lastMessageTime = 0;
+        this.minMessageInterval = 100; // ULTRA FAST - 100ms between messages (was 1000ms)
+        this.messageTimeout = 5000; // Reduced timeout (was 15000)
+        this.maxProcessedMessages = 50; // Reduced from 100
+        this.queueTimeout = 5000; // Reduced from 10000
+        this.maxMessageAge = 60; // Increased from 30 to handle more messages
         this.setupMessageHandler();
     }
 
@@ -417,152 +425,236 @@ class WhatsAppAnimeBot {
         if (this.messageHandler) this.sock.ev.off('messages.upsert', this.messageHandler);
         
         this.messageHandler = async (messageUpdate) => {
-            // Sort messages by timestamp to process the most recent first
-            const sortedMessages = messageUpdate.messages?.sort((a, b) => 
-                (b.messageTimestamp || 0) - (a.messageTimestamp || 0)
-            ) || [];
-            
-            for (const message of sortedMessages) {
-                const msgContent = message.message?.conversation || message.message?.extendedTextMessage?.text;
-                const messageTimestamp = message.messageTimestamp || 0;
-                
-                if (message.key.fromMe || !msgContent) {
-                    continue;
-                }
+            const sortedMessages = messageUpdate.messages?.sort((a, b) => (b.messageTimestamp || 0) - (a.messageTimestamp || 0)) || [];
 
-                const chatId = message.key.remoteJid;
-                const senderNumber = message.key.participant || message.key.remoteJid?.split('@')[0];
-                console.log(`[MSG] From: ${senderNumber} in ${chatId} | Content: ${msgContent}`);
-                
-                // Only process messages that are recent (within last 30 seconds) or newer than the last processed message
-                const currentTime = Math.floor(Date.now() / 1000);
-                const messageAge = currentTime - messageTimestamp;
-                
-                if (messageAge > 30 && messageTimestamp <= this.lastMessageTimestamp) {
-                    continue;
-                }
-                
-                const messageId = `${message.key.remoteJid}-${message.key.id}-${messageTimestamp}`;
-                if (this.processedMessages.has(messageId)) {
-                    continue;
-                }
-                
-                this.processedMessages.add(messageId);
-                this.lastMessageTimestamp = Math.max(this.lastMessageTimestamp, messageTimestamp);
-                
-                if (this.processedMessages.size > 200) {
-                    this.processedMessages.delete(this.processedMessages.values().next().value);
-                }
-                
+            for (const message of sortedMessages) {
                 try {
-                    // --- Owner-only Control Logic ---
-                    if (msgContent.trim() === '.a' || msgContent.trim() === '.ابدا') {
-                        if (!this.isOwner(senderNumber)) {
-                            continue; // Silent ignore - no response
-                        }
-                        
-                        // Show groups list for selection
-                        const groups = await this.getGroupsList();
-                        if (groups.length === 0) {
-                            await this.sock.sendMessage(chatId, { text: '❌ No groups found!' });
-                            continue;
-                        }
-                        
-                        let groupsList = '📋 **Available Groups:**\n';
-                        groups.forEach((group, index) => {
-                            groupsList += `${index + 1}. ${group.name} (${group.participants} members)\n`;
-                        });
-                        groupsList += '\nReply with the group number to activate the bot in that group.';
-                        
-                        await this.sock.sendMessage(chatId, { text: groupsList });
+                    const msgContent = message.message?.conversation || message.message?.extendedTextMessage?.text;
+                    if (message.key.fromMe || !msgContent) continue;
+
+                    const chatId = message.key.remoteJid;
+                    const senderNumber = message.key.participant || message.key.remoteJid?.split('@')[0];
+                    const messageTimestamp = message.messageTimestamp || 0;
+                    const messageId = message.key.id;
+
+                    // ULTRA FAST RATE LIMITING - Minimal delay
+                    const currentTime = Date.now();
+                    if (currentTime - this.lastMessageTime < this.minMessageInterval) {
                         continue;
                     }
-                    
-                    if (msgContent.trim() === '.x' || msgContent.trim() === '.وقف') {
-                        if (!this.isOwner(senderNumber)) {
-                            continue; // Silent ignore - no response
-                        }
-                        
-                        this.isActive = false;
-                        this.selectedGroup = null;
-                        await this.sock.sendMessage(chatId, { text: '🔴 Bot deactivated successfully!' });
+
+                    // If bot is active, ignore messages older than the activation timestamp
+                    if (this.isActive && this.activationTimestamp && messageTimestamp < this.activationTimestamp) {
                         continue;
                     }
+
+                    // Enhanced message deduplication
+                    const messageKey = `${chatId}-${messageId}-${messageTimestamp}`;
+                    if (this.processedMessages.has(messageKey)) continue;
                     
-                    // Group selection logic
-                    if (this.isOwner(senderNumber) && /^\d+$/.test(msgContent.trim()) && !this.isActive) {
-                        const groups = await this.getGroupsList();
-                        const selectedIndex = parseInt(msgContent.trim()) - 1;
-                        
-                        if (selectedIndex >= 0 && selectedIndex < groups.length) {
-                            this.selectedGroup = groups[selectedIndex].id;
-                            this.isActive = true;
-                            
-                            // Clear the group chat
-                            await this.clearGroupChat(this.selectedGroup);
-                            
-                            await this.sock.sendMessage(chatId, { 
-                                text: `✅ Bot activated in: **${groups[selectedIndex].name}**\n\nChat cleared and bot is now active in this group.` 
-                            });
-                        } else {
-                            await this.sock.sendMessage(chatId, { text: '❌ Invalid group number!' });
-                        }
+                    // Check if message is too old
+                    const currentTimeSeconds = Math.floor(Date.now() / 1000);
+                    if (currentTimeSeconds - messageTimestamp > this.maxMessageAge) {
+                        console.log(`[SKIP] Message too old: ${messageId}`);
                         continue;
                     }
-                    
-                    // Status check command
-                    if (msgContent.trim() === '.status' || msgContent.trim() === '.حالة') {
-                        const status = this.getStatus();
-                        await this.sock.sendMessage(chatId, { text: `🤖 Bot Status: ${status.status}` });
+
+                    // Check if message is already being processed
+                    if (this.messageProcessingQueue.has(messageId)) {
+                        console.log(`[SKIP] Message already being processed: ${messageId}`);
                         continue;
                     }
+
+                    this.processedMessages.add(messageKey);
+                    this.messageProcessingQueue.set(messageId, Date.now());
                     
-                    // The character detection logic ONLY runs if the bot is active and in the selected group
-                    if (!this.isActive) continue;
-                    
-                    // Check if message is from the selected group
-                    if (this.selectedGroup && chatId !== this.selectedGroup) {
-                        continue;
+                    // Clean up old processed messages
+                    if (this.processedMessages.size > this.maxProcessedMessages) {
+                        const firstKey = this.processedMessages.values().next().value;
+                        this.processedMessages.delete(firstKey);
                     }
-                    
-                    const result = await this.animeBot.processMessage({ body: msgContent });
-                    if (result?.learnedCharacters?.length > 0) {
-                        const responseData = this.animeBot.formatResponse(result);
-                        if (responseData?.text) {
-                            // Pass mistake information to delay calculation
-                            const delay = this.animeBot.getAdaptiveDelay(
-                                responseData.characterCount, 
-                                responseData.isMistake, 
-                                responseData.mistakeType
-                            );
-                            
-                            await this.animeBot.sleep(delay);
-                            await this.sock.sendMessage(chatId, { text: responseData.text });
-                            
-                            if (responseData.isMistake) {
-                                // 50% chance to correct the mistake after a delay
-                                if (this.animeBot.shouldCorrectMistake()) {
-                                    setTimeout(async () => {
-                                        try {
-                                            const correctionText = this.animeBot.generateCorrectionMessage(
-                                                responseData.originalCharacters
-                                            );
-                                            await this.sock.sendMessage(chatId, { text: correctionText });
-                                        } catch (error) {
-                                            console.error('Error sending correction:', error);
-                                        }
-                                    }, 2000 + Math.random() * 1000); // 2-3 seconds delay
-                                }
-                            }
+
+                    // Clean up old processing queue entries
+                    for (const [id, timestamp] of this.messageProcessingQueue.entries()) {
+                        if (Date.now() - timestamp > this.queueTimeout) {
+                            this.messageProcessingQueue.delete(id);
                         }
                     }
+
+                    this.lastMessageTime = currentTime;
+
+                    console.log(`[MSG] Processing: ${senderNumber} in ${chatId} | Content: ${msgContent.substring(0, 50)}...`);
+                    
+                    // Process message with timeout
+                    const processingPromise = this.handleCommand(msgContent, senderNumber, chatId);
+                    const timeoutPromise = new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Message processing timeout')), this.messageTimeout)
+                    );
+                    
+                    try {
+                        await Promise.race([processingPromise, timeoutPromise]);
+                    } catch (error) {
+                        console.error(`❌ Error processing message ${messageId}:`, error.message);
+                    } finally {
+                        // Remove from processing queue
+                        this.messageProcessingQueue.delete(messageId);
+                    }
+                    
                 } catch (error) {
-                    console.error('Bot processing error:', error);
+                    console.error(`❌ Error in message handler:`, error);
                 }
             }
         };
         
         this.sock.ev.on('messages.upsert', this.messageHandler);
+    }
+
+    async handleCommand(msgContent, senderNumber, chatId) {
+        const command = msgContent.trim();
+
+        // Owner-only commands
+        if (this.isOwner(senderNumber)) {
+            if (command === '.a' || command === '.ابدا') {
+                const groups = await this.getGroupsList();
+                if (groups.length === 0) {
+                    await this.sock.sendMessage(chatId, { text: '❌ No groups found!' });
+                    return;
+                }
+                let groupsList = '📋 **Available Groups:**\n';
+                groups.forEach((group, index) => {
+                    const isSelected = this.selectedGroup === group.id;
+                    const status = isSelected ? '✅ (Selected)' : '';
+                    groupsList += `${index + 1}. ${group.name} (${group.participants} members) ${status}\n`;
+                });
+                groupsList += '\n📝 **Commands:**';
+                groupsList += '\n• Reply with a number to activate bot in that group';
+                groupsList += '\n• `.clear` or `.مسح` - Clear the selected group chat';
+                groupsList += '\n• `.x` or `.وقف` - Deactivate the bot';
+                groupsList += '\n• `.status` or `.حالة` - Check bot status';
+                
+                if (this.isActive) {
+                    groupsList += `\n\n🤖 **Bot Status:** Active in selected group`;
+                } else {
+                    groupsList += `\n\n🤖 **Bot Status:** Inactive - Select a group to activate`;
+                }
+                
+                await this.sock.sendMessage(chatId, { text: groupsList });
+                return;
+            }
+
+            if (command === '.x' || command === '.وقف') {
+                this.isActive = false;
+                this.selectedGroup = null;
+                this.activationTimestamp = null; // Reset timestamp on deactivation
+                await this.sock.sendMessage(chatId, { text: '🔴 Bot deactivated successfully!' });
+                return;
+            }
+
+            if (command === '.clear' || command === '.مسح') {
+                if (this.selectedGroup) {
+                    await this.sock.sendMessage(chatId, { text: '🧹 Clearing group chat...' });
+                    await this.clearGroupChat(this.selectedGroup);
+                    await this.sock.sendMessage(chatId, { text: '✅ Group chat cleared successfully!' });
+                } else {
+                    await this.sock.sendMessage(chatId, { text: '❌ No group selected. Use .ابدا first to select a group.' });
+                }
+                return;
+            }
+
+            if (/^\d+$/.test(command) && !this.isActive) {
+                const groups = await this.getGroupsList();
+                const selectedIndex = parseInt(command) - 1;
+                if (selectedIndex >= 0 && selectedIndex < groups.length) {
+                    const selectedGroup = groups[selectedIndex];
+                    
+                    // Send initial activation message
+                    await this.sock.sendMessage(chatId, {
+                        text: `🔄 Activating bot in: **${selectedGroup.name}**\n\nClearing chat and setting up bot session...`
+                    });
+                    
+                    try {
+                        // Clear the group chat first
+                        await this.clearGroupChat(selectedGroup.id);
+                        
+                        // Set bot as active
+                        this.selectedGroup = selectedGroup.id;
+                        this.isActive = true;
+                        this.activationTimestamp = Math.floor(Date.now() / 1000);
+                        
+                        // Send success message
+                        await this.sock.sendMessage(chatId, {
+                            text: `✅ Bot successfully activated in: **${selectedGroup.name}**\n\n🧹 Chat has been cleared\n🤖 Bot is now active and ready to detect anime characters!`
+                        });
+                        
+                        // Send a message to the group to announce bot activation
+                        await this.sock.sendMessage(selectedGroup.id, {
+                            text: `🤖 Anime Character Detector Bot is now active!\n\nSend messages with anime character names wrapped in asterisks like:\n*ناروتو* *ساكورا* *ساسكي*`
+                        });
+                        
+                    } catch (error) {
+                        console.error('❌ Error during bot activation:', error);
+                        await this.sock.sendMessage(chatId, {
+                            text: `❌ Failed to activate bot in ${selectedGroup.name}: ${error.message}`
+                        });
+                        // Reset state on error
+                        this.selectedGroup = null;
+                        this.isActive = false;
+                        this.activationTimestamp = null;
+                    }
+                } else {
+                    await this.sock.sendMessage(chatId, { text: '❌ Invalid group number!' });
+                }
+                return;
+            }
+        }
+
+        // Public commands
+        if (command === '.status' || command === '.حالة') {
+            const status = this.getStatus();
+            await this.sock.sendMessage(chatId, { text: `🤖 Bot Status: ${status.status}` });
+            return;
+        }
+
+        // Character detection logic with improved error handling
+        if (this.isActive && (!this.selectedGroup || chatId === this.selectedGroup)) {
+            try {
+                const result = await this.animeBot.processMessage({ body: msgContent });
+                if (result?.learnedCharacters?.length > 0) {
+                    const responseData = this.animeBot.formatResponse(result);
+                    if (responseData?.text) {
+                        const delay = this.animeBot.getAdaptiveDelay(responseData.characterCount, responseData.isMistake, responseData.mistakeType);
+                        
+                        // ULTRA FAST - Minimal random delay
+                        const randomDelay = Math.random() * 50; // Reduced from 500
+                        await this.animeBot.sleep(delay + randomDelay);
+                        
+                        // Send message with retry logic
+                        let retryCount = 0;
+                        const maxRetries = 1; // Reduced from 2
+                        
+                        while (retryCount < maxRetries) {
+                            try {
+                                await this.sock.sendMessage(chatId, { text: responseData.text });
+                                break; // Success, exit retry loop
+                            } catch (error) {
+                                retryCount++;
+                                console.error(`❌ Failed to send message (attempt ${retryCount}/${maxRetries}):`, error.message);
+                                
+                                if (retryCount >= maxRetries) {
+                                    console.error('❌ Max retries reached for sending message');
+                                    break;
+                                }
+                                
+                                // Wait before retry
+                                await this.animeBot.sleep(500 * retryCount); // Reduced from 1000
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('❌ Error in character detection:', error.message);
+            }
+        }
     }
 
     cleanup() {
