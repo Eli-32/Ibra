@@ -43,9 +43,9 @@ app.get('/', (req, res) => {
 });
 
 // Start Express server
-app.listen(PORT, () => {
+app.listen(PORT, '0.0.0.0', () => {
   console.log(`🌐 Web server running on port ${PORT}`);
-  console.log(`📡 Uptime URL: http://localhost:${PORT}/`);
+  console.log(`📡 Access the QR code at your public URL + /qr`);
 });
 
 console.log('🚀 Starting Anime Character Detector Bot...');
@@ -103,7 +103,7 @@ async function startBot() {
           return;
         }
         qrCodeDataUrl = url;
-        console.log(`📱 QR code is ready. Scan it by opening this URL in your browser: http://localhost:${PORT}/qr`);
+        console.log(`📱 QR code is ready. Open your public URL and add "/qr" to the end to scan the code.`);
       });
     }
     
