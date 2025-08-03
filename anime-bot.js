@@ -115,6 +115,9 @@ async function startBot() {
       if (statusCode === DisconnectReason.loggedOut) {
         console.log('🚫 Logged out. Please delete the session and scan the QR code again.');
         process.exit(1); // Exit so the container can restart
+      } else if (statusCode === 515) {
+        console.log('⚠️ Received restart required signal (515). Ignoring as requested.');
+        // Do not reconnect for this specific error to prevent loops.
       } else {
         console.log('🔄 Reconnecting...');
         startBot().catch(console.error);
