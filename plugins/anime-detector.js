@@ -376,6 +376,7 @@ class WhatsAppAnimeBot {
         this.animeBot = new AnimeCharacterBot();
         this.isActive = false; // Bot starts as inactive by default
         this.selectedGroup = null; // Selected group to work in
+        this.activationTimestamp = null; // Timestamp for when the bot is activated
         this.ownerNumbers = ['96176337375','966584646464','967771654273','967739279014']; // Add owner phone numbers here
         this.messageHandler = null;
         this.processedMessages = new Set();
@@ -426,6 +427,11 @@ class WhatsAppAnimeBot {
                     const chatId = message.key.remoteJid;
                     const senderNumber = message.key.participant || message.key.remoteJid?.split('@')[0];
                     const messageTimestamp = message.messageTimestamp || 0;
+
+                    // If bot is active, ignore messages older than the activation timestamp
+                    if (this.isActive && this.activationTimestamp && messageTimestamp < this.activationTimestamp) {
+                        continue;
+                    }
 
                     const messageId = `${chatId}-${message.key.id}-${messageTimestamp}`;
                     if (this.processedMessages.has(messageId)) continue;
@@ -481,6 +487,7 @@ class WhatsAppAnimeBot {
                 if (selectedIndex >= 0 && selectedIndex < groups.length) {
                     this.selectedGroup = groups[selectedIndex].id;
                     this.isActive = true;
+                    this.activationTimestamp = Math.floor(Date.now() / 1000); // Set activation time
                     await this.clearGroupChat(this.selectedGroup);
                     await this.sock.sendMessage(chatId, {
                         text: `✅ Bot activated in: **${groups[selectedIndex].name}**\n\nChat cleared and bot is now active in this group.`
@@ -509,16 +516,7 @@ class WhatsAppAnimeBot {
                     await this.animeBot.sleep(delay);
                     await this.sock.sendMessage(chatId, { text: responseData.text });
 
-                    if (responseData.isMistake && this.animeBot.shouldCorrectMistake()) {
-                        setTimeout(async () => {
-                            try {
-                                const correctionText = this.animeBot.generateCorrectionMessage(responseData.originalCharacters);
-                                await this.sock.sendMessage(chatId, { text: correctionText });
-                            } catch (error) {
-                                console.error('❌ Error sending correction:', error);
-                            }
-                        }, 2000 + Math.random() * 1000);
-                    }
+                    // The mistake correction logic has been removed as requested.
                 }
             }
         }
