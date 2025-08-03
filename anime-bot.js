@@ -8,6 +8,8 @@ import fs from 'fs';
 let currentAnimeBot = null;
 let qrCodeDataUrl = null;
 let isFirstRun = true;
+let retryCount = 0;
+const maxRetry = 5;
 
 // Create Express server
 const app = express();
@@ -89,9 +91,9 @@ async function startBot() {
     printQRInTerminal: false,
     logger: pino({ level: 'debug' }),
     browser: ['Anime Detector Bot', 'Chrome', '1.0.0'],
-    defaultQueryTimeoutMs: 120000,
-    connectTimeoutMs: 120000,
-    keepAliveIntervalMs: 20000,
+    defaultQueryTimeoutMs: 180000, // 3 minutes
+    connectTimeoutMs: 180000, // 3 minutes
+    keepAliveIntervalMs: 30000, // 30 seconds
     markOnlineOnConnect: true,
     syncFullHistory: false,
   });
@@ -112,18 +114,24 @@ async function startBot() {
     }
     
     if (connection === 'close') {
-      qrCodeDataUrl = null; // Clear QR code on close
-      const statusCode = lastDisconnect?.error?.output?.statusCode;
-      console.log('❌ Connection closed due to:', statusCode || 'Unknown');
+        qrCodeDataUrl = null;
+        const statusCode = lastDisconnect?.error?.output?.statusCode;
+        console.log('❌ Connection closed due to:', statusCode || 'Unknown');
 
-      if (statusCode === DisconnectReason.loggedOut) {
-        console.log('🚫 Logged out. Please delete the session and scan the QR code again.');
-        process.exit(1); // Exit so the container can restart
-      } else {
-        console.log('🔄 Reconnecting...');
-        startBot().catch(console.error);
-      }
+        if (statusCode === DisconnectReason.loggedOut) {
+            console.log('🚫 Logged out. Please delete the session and scan the QR code again.');
+            process.exit(1);
+        } else if (retryCount < maxRetry) {
+            retryCount++;
+            const delay = Math.pow(2, retryCount) * 1000; // Exponential backoff
+            console.log(`🔄 Reconnecting... (Attempt ${retryCount}/${maxRetry}, retrying in ${delay / 1000}s)`);
+            setTimeout(() => startBot().catch(console.error), delay);
+        } else {
+            console.error('❌ Max retries reached. Could not reconnect.');
+            process.exit(1);
+        }
     } else if (connection === 'open') {
+      retryCount = 0; // Reset retry count on successful connection
       qrCodeDataUrl = null; // Clear QR code on successful connection
       console.log('✅ Connected to WhatsApp successfully!');
       console.log(`👤 Logged in as: ${sock.user?.name || 'Unknown'}`);
