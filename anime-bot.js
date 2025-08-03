@@ -1,5 +1,5 @@
 import { makeWASocket, DisconnectReason, useMultiFileAuthState } from '@whiskeysockets/baileys';
-import qr from 'qrcode';
+import qrcode from 'qrcode';
 import pino from 'pino';
 import express from 'express';
 import fs from 'fs';
@@ -97,7 +97,7 @@ async function startBot() {
     const { connection, lastDisconnect, qr } = update;
     
     if (qr) {
-      qr.toDataURL(qr, (err, url) => {
+      qrcode.toDataURL(qr, (err, url) => {
         if (err) {
           console.error('❌ Error generating QR code:', err);
           return;
