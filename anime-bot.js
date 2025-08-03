@@ -13,6 +13,17 @@ let connectionState = 'disconnected';
 let lastConnectionAttempt = 0;
 const connectionCooldown = 10000; // 10 seconds cooldown between connection attempts
 
+// Create logs directory if it doesn't exist
+const logsDir = './logs';
+if (!fs.existsSync(logsDir)) {
+    try {
+        fs.mkdirSync(logsDir, { recursive: true });
+        console.log('📁 Created logs directory');
+    } catch (error) {
+        console.log('⚠️ Could not create logs directory:', error.message);
+    }
+}
+
 // Create Express server
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -125,6 +136,28 @@ function clearInvalidSession() {
   }
 }
 
+// Function to create logger with fallback
+function createLogger() {
+  try {
+    // Check if logs directory exists and is writable
+    if (fs.existsSync(logsDir) && fs.accessSync) {
+      fs.accessSync(logsDir, fs.constants.W_OK);
+      return pino({ 
+        level: 'silent',
+        transport: {
+          target: 'pino/file',
+          options: { destination: './logs/baileys.log' }
+        }
+      });
+    }
+  } catch (error) {
+    console.log('⚠️ Logging to file disabled:', error.message);
+  }
+  
+  // Fallback to console-only logging
+  return pino({ level: 'silent' });
+}
+
 // Improved connection management with better error handling
 async function startBot() {
     const now = Date.now();
@@ -151,13 +184,7 @@ async function startBot() {
         const sock = makeWASocket({
             auth: state,
             printQRInTerminal: false,
-            logger: pino({ 
-                level: 'silent',
-                transport: {
-                    target: 'pino/file',
-                    options: { destination: './logs/baileys.log' }
-                }
-            }),
+            logger: createLogger(),
             browser: ['Chrome', 'Linux', '10.0'],
             // Use configuration for connection settings
             connectTimeoutMs: 60000,

@@ -14,7 +14,9 @@
         "qrcode": "^1.5.3"
     },
     "scripts": {
-        "start": "node anime-bot.js",
+        "start": "node start.js",
+        "start:direct": "node anime-bot.js",
+        "check": "node check-env.js",
         "monitor": "node monitor.js",
         "monitor:watch": "node monitor.js --watch",
         "clear-session": "node clear-session.js",
