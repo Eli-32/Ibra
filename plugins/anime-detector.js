@@ -587,10 +587,7 @@ class WhatsAppAnimeBot {
                         });
                         
                         // Send a message to the group to announce bot activation
-                        await this.sock.sendMessage(selectedGroup.id, {
-                            text: `🤖 Anime Character Detector Bot is now active!\n\nSend messages with anime character names wrapped in asterisks like:\n*ناروتو* *ساكورا* *ساسكي*`
-                        });
-                        
+                
                     } catch (error) {
                         console.error('❌ Error during bot activation:', error);
                         await this.sock.sendMessage(chatId, {
