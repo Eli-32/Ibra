@@ -1,14 +1,36 @@
 import { makeWASocket, DisconnectReason, useMultiFileAuthState } from '@whiskeysockets/baileys';
-import qrcode from 'qrcode-terminal';
+import qr from 'qrcode';
 import pino from 'pino';
 import express from 'express';
+import fs from 'fs';
 
 // Global variable to store the current bot instance
 let currentAnimeBot = null;
+let qrCodeDataUrl = null;
 
 // Create Express server
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Add QR code endpoint
+app.get('/qr', (req, res) => {
+  if (qrCodeDataUrl) {
+    res.send(`
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background-color: #f0f0f0;">
+        <h1 style="font-family: sans-serif;">Scan QR Code</h1>
+        <img src="${qrCodeDataUrl}" alt="QR Code" style="width: 300px; height: 300px;"/>
+        <p style="font-family: sans-serif; margin-top: 20px;">Scan this with your WhatsApp to connect the bot.</p>
+      </div>
+    `);
+  } else {
+    res.send(`
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100vh; background-color: #f0f0f0;">
+        <h1 style="font-family: sans-serif;">Waiting for QR Code...</h1>
+        <p style="font-family: sans-serif;">Please wait a moment, the QR code is being generated. Refresh this page in a few seconds.</p>
+      </div>
+    `);
+  }
+});
 
 // Add uptime endpoint
 app.get('/', (req, res) => {
@@ -46,6 +68,14 @@ async function loadAnimeBot() {
 // Debounce mechanism for hot-reload
 
 async function startBot() {
+  // --- Force a clean session on every start ---
+  const sessionDir = './AnimeSession';
+  if (fs.existsSync(sessionDir)) {
+    fs.rmSync(sessionDir, { recursive: true, force: true });
+    console.log('🗑️ Previous session cleared successfully.');
+  }
+  // --- End of clean session logic ---
+
   // Use multi-file auth state
   const { state, saveCreds } = await useMultiFileAuthState('./AnimeSession');
   
@@ -67,21 +97,30 @@ async function startBot() {
     const { connection, lastDisconnect, qr } = update;
     
     if (qr) {
-      console.log('📱 Scan this QR code with your WhatsApp:');
-      qrcode.generate(qr, { small: true });
+      qr.toDataURL(qr, (err, url) => {
+        if (err) {
+          console.error('❌ Error generating QR code:', err);
+          return;
+        }
+        qrCodeDataUrl = url;
+        console.log(`📱 QR code is ready. Scan it by opening this URL in your browser: http://localhost:${PORT}/qr`);
+      });
     }
     
     if (connection === 'close') {
-      const shouldReconnect = lastDisconnect?.error?.output?.statusCode !== DisconnectReason.loggedOut;
-      console.log('❌ Connection closed due to:', lastDisconnect?.error?.output?.statusCode || 'Unknown');
-      
-      if (shouldReconnect) {
-        console.log('🔄 Reconnecting in 3 seconds...');
-        setTimeout(startBot, 3000);
+      qrCodeDataUrl = null; // Clear QR code on close
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      console.log('❌ Connection closed due to:', statusCode || 'Unknown');
+
+      if (statusCode === DisconnectReason.loggedOut) {
+        console.log('🚫 Logged out. Please delete the session and scan the QR code again.');
+        process.exit(1); // Exit so the container can restart
       } else {
-        console.log('🚫 Logged out. Please restart and scan QR code again.');
+        console.log('🔄 Reconnecting...');
+        startBot().catch(console.error);
       }
     } else if (connection === 'open') {
+      qrCodeDataUrl = null; // Clear QR code on successful connection
       console.log('✅ Connected to WhatsApp successfully!');
       console.log(`👤 Logged in as: ${sock.user?.name || 'Unknown'}`);
       console.log(`📱 Phone: ${sock.user?.id?.split(':')[0] || 'Unknown'}`);
