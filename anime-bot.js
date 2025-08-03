@@ -167,7 +167,7 @@ async function startBot() {
       retryRequestDelayMs: 5000, // Increased delay between retries
       maxRetries: 0, // NO automatic retries
       // Very conservative settings
-      shouldIgnoreJid: jid => jid.includes('@broadcast'),
+      shouldIgnoreJid: jid => jid && jid.includes && jid.includes('@broadcast'),
       fireInitQueries: false,
       emitOwnEvents: false,
       // Additional conservative settings
@@ -178,7 +178,7 @@ async function startBot() {
       retryRequestDelayMs: 10000, // 10 seconds between retries
       maxRetries: 0, // No automatic retries
       // Connection stability
-      shouldIgnoreJid: jid => jid.includes('@broadcast'),
+      shouldIgnoreJid: jid => jid && jid.includes && jid.includes('@broadcast'),
       fireInitQueries: false,
       emitOwnEvents: false
     });
@@ -205,7 +205,7 @@ async function startBot() {
           console.log(`⏳ Waiting ${waitMinutes} minutes before retry...`);
           console.log('💡 This is to avoid triggering another ban.');
           setTimeout(startBot, waitTime);
-        } else if (reason === 515 || reason === 408) {
+        } else if (reason === 515 || reason === 408 || reason === 428) {
           // Fast reconnect for connection timeouts (not rate limits)
           const waitTime = 3000; // 3 seconds for connection errors
           console.log(`🔄 Connection timeout, reconnecting in 3 seconds...`);
