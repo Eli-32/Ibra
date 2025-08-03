@@ -5,22 +5,13 @@
     "main": "anime-bot.js",
     "type": "module",
     "dependencies": {
-        "@whiskeysockets/baileys": "latest",
+        "@whiskeysockets/baileys": "^6.7.8",
         "axios": "^1.10.0",
         "express": "^5.1.0",
-        "node-fetch": "^3.3.2",
         "pino": "^9.7.0",
-        "qrcode-terminal": "^0.12.0",
-        "qrcode": "^1.5.3"
+        "qrcode-terminal": "^0.12.0"
     },
     "scripts": {
-        "start": "node start.js",
-        "start:direct": "node anime-bot.js",
-        "check": "node check-env.js",
-        "monitor": "node monitor.js",
-        "monitor:watch": "node monitor.js --watch",
-        "clear-session": "node clear-session.js",
-        "clear-session:force": "node clear-session.js --force",
-        "fix-401": "node fix-401.js"
+        "start": "node anime-bot.js"
     }
 }
