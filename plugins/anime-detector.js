@@ -379,7 +379,6 @@ class WhatsAppAnimeBot {
         this.ownerNumbers = ['96176337375','966584646464','967771654273','967739279014']; // Add owner phone numbers here
         this.messageHandler = null;
         this.processedMessages = new Set();
-        this.lastMessageTimestamp = 0; // Track the most recent message timestamp
         this.setupMessageHandler();
     }
 
@@ -424,7 +423,6 @@ class WhatsAppAnimeBot {
             
             for (const message of sortedMessages) {
                 const msgContent = message.message?.conversation || message.message?.extendedTextMessage?.text;
-                const messageTimestamp = message.messageTimestamp || 0;
                 
                 if (message.key.fromMe || !msgContent) {
                     continue;
@@ -434,21 +432,20 @@ class WhatsAppAnimeBot {
                 const senderNumber = message.key.participant || message.key.remoteJid?.split('@')[0];
                 console.log(`[MSG] From: ${senderNumber} in ${chatId} | Content: ${msgContent}`);
                 
-                // Only process messages that are recent (within last 30 seconds) or newer than the last processed message
+                // Ignore messages older than 30 seconds to prevent processing backlog on reconnect
                 const currentTime = Math.floor(Date.now() / 1000);
-                const messageAge = currentTime - messageTimestamp;
-                
-                if (messageAge > 30 && messageTimestamp <= this.lastMessageTimestamp) {
+                const messageAge = currentTime - (message.messageTimestamp || 0);
+
+                if (messageAge > 30) {
                     continue;
                 }
                 
-                const messageId = `${message.key.remoteJid}-${message.key.id}-${messageTimestamp}`;
+                const messageId = `${message.key.remoteJid}-${message.key.id}-${message.messageTimestamp}`;
                 if (this.processedMessages.has(messageId)) {
                     continue;
                 }
                 
                 this.processedMessages.add(messageId);
-                this.lastMessageTimestamp = Math.max(this.lastMessageTimestamp, messageTimestamp);
                 
                 if (this.processedMessages.size > 200) {
                     this.processedMessages.delete(this.processedMessages.values().next().value);
