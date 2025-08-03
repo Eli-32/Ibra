@@ -7,6 +7,7 @@ import fs from 'fs';
 // Global variable to store the current bot instance
 let currentAnimeBot = null;
 let qrCodeDataUrl = null;
+let isFirstRun = true;
 
 // Create Express server
 const app = express();
@@ -68,11 +69,14 @@ async function loadAnimeBot() {
 // Debounce mechanism for hot-reload
 
 async function startBot() {
-  // --- Force a clean session on every start ---
-  const sessionDir = './AnimeSession';
-  if (fs.existsSync(sessionDir)) {
-    fs.rmSync(sessionDir, { recursive: true, force: true });
-    console.log('🗑️ Previous session cleared successfully.');
+  // --- Force a clean session on the FIRST start ---
+  if (isFirstRun) {
+    const sessionDir = './AnimeSession';
+    if (fs.existsSync(sessionDir)) {
+      fs.rmSync(sessionDir, { recursive: true, force: true });
+      console.log('🗑️ Previous session cleared successfully.');
+    }
+    isFirstRun = false;
   }
   // --- End of clean session logic ---
 
