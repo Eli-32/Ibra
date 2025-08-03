@@ -8,9 +8,9 @@ import express from 'express';
 // Global variable to store the current bot instance
 let currentAnimeBot = null;
 let retryCount = 0;
-const maxRetries = 3;
+const maxRetries = 2; // Reduced from 3
 let lastRetryTime = 0;
-const minRetryInterval = 30000; // 30 seconds minimum between retries
+const minRetryInterval = 5000; // 5 seconds minimum between retries
 
 // Create Express server
 const app = express();
@@ -130,7 +130,8 @@ async function startBot() {
   const now = Date.now();
   if (retryCount > 0) {
     if (now - lastRetryTime < minRetryInterval) {
-      console.log(`⏳ Too soon to retry. Waiting ${Math.ceil((minRetryInterval - (now - lastRetryTime)) / 1000)} seconds...`);
+      const remainingTime = Math.ceil((minRetryInterval - (now - lastRetryTime)) / 1000 / 60);
+      console.log(`⏳ Too soon to retry. Waiting ${remainingTime} more minutes...`);
       setTimeout(startBot, minRetryInterval - (now - lastRetryTime));
       return;
     }
@@ -138,6 +139,7 @@ async function startBot() {
     if (retryCount >= maxRetries) {
       console.log('❌ Max retries reached. Please check your connection and try again later.');
       console.log('💡 Try clearing session with: rm -rf ./AnimeSession && npm start');
+      console.log('💡 Or wait several hours before trying again.');
       process.exit(1);
     }
   }
@@ -152,19 +154,30 @@ async function startBot() {
     // Use multi-file auth state
     const { state, saveCreds } = await useMultiFileAuthState('./AnimeSession');
     
-    // Create WhatsApp socket with better configuration
+    // Create WhatsApp socket with VERY conservative configuration
     const sock = makeWASocket({
       auth: state,
       printQRInTerminal: false,
       logger: pino({ level: 'error' }),
       browser: ['Anime Detector Bot', 'Chrome', '1.0.0'],
-      defaultQueryTimeoutMs: 60000, // Reduced from 120000
-      connectTimeoutMs: 60000, // Reduced from 120000
-      keepAliveIntervalMs: 30000, // Increased from 20000
-      markOnlineOnConnect: false, // Changed to false to reduce suspicion
-      retryRequestDelayMs: 2000, // Add delay between retries
-      maxRetries: 1, // Reduce max retries
-      // Add connection stability settings
+      defaultQueryTimeoutMs: 120000, // Increased to 2 minutes
+      connectTimeoutMs: 120000, // Increased to 2 minutes
+      keepAliveIntervalMs: 60000, // Increased to 1 minute
+      markOnlineOnConnect: false, // Keep offline to avoid suspicion
+      retryRequestDelayMs: 5000, // Increased delay between retries
+      maxRetries: 0, // NO automatic retries
+      // Very conservative settings
+      shouldIgnoreJid: jid => jid.includes('@broadcast'),
+      fireInitQueries: false,
+      emitOwnEvents: false,
+      // Additional conservative settings
+      connectTimeoutMs: 180000, // 3 minutes
+      keepAliveIntervalMs: 90000, // 1.5 minutes
+      markOnlineOnConnect: false,
+      // Disable aggressive features
+      retryRequestDelayMs: 10000, // 10 seconds between retries
+      maxRetries: 0, // No automatic retries
+      // Connection stability
       shouldIgnoreJid: jid => jid.includes('@broadcast'),
       fireInitQueries: false,
       emitOwnEvents: false
@@ -186,13 +199,20 @@ async function startBot() {
         console.log(`❌ Connection closed due to: ${reason}`);
         
         if (reason === 403 || reason === 503) {
-          console.log('🚫 Rate limited or blocked by WhatsApp. Waiting longer before retry...');
-          const waitTime = Math.min(60000 * retryCount, 300000); // 1-5 minutes
-          console.log(`⏳ Waiting ${waitTime / 1000} seconds before retry...`);
+          console.log('🚫 Rate limited or blocked by WhatsApp. Waiting much longer before retry...');
+          const waitTime = Math.min(900000 * retryCount, 3600000); // 15-60 minutes
+          const waitMinutes = Math.ceil(waitTime / 1000 / 60);
+          console.log(`⏳ Waiting ${waitMinutes} minutes before retry...`);
+          console.log('💡 This is to avoid triggering another ban.');
+          setTimeout(startBot, waitTime);
+        } else if (reason === 515 || reason === 408) {
+          // Fast reconnect for connection timeouts (not rate limits)
+          const waitTime = 3000; // 3 seconds for connection errors
+          console.log(`🔄 Connection timeout, reconnecting in 3 seconds...`);
           setTimeout(startBot, waitTime);
         } else if (shouldReconnect) {
-          const waitTime = Math.min(10000 * retryCount, 60000); // 10-60 seconds
-          console.log(`🔄 Reconnecting in ${waitTime / 1000} seconds...`);
+          const waitTime = 10000; // 10 seconds for other errors
+          console.log(`🔄 Reconnecting in 10 seconds...`);
           setTimeout(startBot, waitTime);
         } else {
           console.log('🚫 Logged out. Please restart and scan QR code again.');
@@ -243,8 +263,9 @@ async function startBot() {
     
   } catch (error) {
     console.error('❌ Error in startBot:', error);
-    const waitTime = Math.min(30000 * retryCount, 120000); // 30 seconds to 2 minutes
-    console.log(`🔄 Retrying in ${waitTime / 1000} seconds...`);
+    const waitTime = Math.min(600000 * retryCount, 3600000); // 10-60 minutes
+    const waitMinutes = Math.ceil(waitTime / 1000 / 60);
+    console.log(`🔄 Retrying in ${waitMinutes} minutes...`);
     setTimeout(startBot, waitTime);
   }
 }
