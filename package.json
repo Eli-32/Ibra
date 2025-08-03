@@ -16,6 +16,9 @@
     "scripts": {
         "start": "node anime-bot.js",
         "monitor": "node monitor.js",
-        "monitor:watch": "node monitor.js --watch"
+        "monitor:watch": "node monitor.js --watch",
+        "clear-session": "node clear-session.js",
+        "clear-session:force": "node clear-session.js --force",
+        "fix-401": "node fix-401.js"
     }
 }
