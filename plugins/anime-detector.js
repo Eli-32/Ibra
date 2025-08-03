@@ -587,7 +587,10 @@ class WhatsAppAnimeBot {
                         });
                         
                         // Send a message to the group to announce bot activation
-                
+                        await this.sock.sendMessage(selectedGroup.id, {
+                            text: `كمل`
+                        });
+                        
                     } catch (error) {
                         console.error('❌ Error during bot activation:', error);
                         await this.sock.sendMessage(chatId, {
