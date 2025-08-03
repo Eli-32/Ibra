@@ -371,15 +371,22 @@ class AnimeCharacterBot {
 
 // WhatsApp Bot Integration for Baileys
 class WhatsAppAnimeBot {
-    constructor(sock) {
+    constructor(sock, config = null) {
         this.sock = sock;
         this.animeBot = new AnimeCharacterBot();
         this.isActive = false; // Bot starts as inactive by default
         this.selectedGroup = null; // Selected group to work in
         this.activationTimestamp = null; // Timestamp for when the bot is activated
-        this.ownerNumbers = ['96176337375','966584646464','967771654273','967739279014']; // Add owner phone numbers here
+        this.ownerNumbers = config?.bot?.ownerNumbers || ['96176337375','966584646464','967771654273','967739279014'];
         this.messageHandler = null;
         this.processedMessages = new Set();
+        this.messageProcessingQueue = new Map(); // Track processing messages
+        this.lastMessageTime = 0;
+        this.minMessageInterval = config?.messageProcessing?.minMessageInterval || 1000; // Minimum 1 second between messages
+        this.messageTimeout = config?.messageProcessing?.messageTimeout || 15000;
+        this.maxProcessedMessages = config?.messageProcessing?.maxProcessedMessages || 100;
+        this.queueTimeout = config?.messageProcessing?.queueTimeout || 10000;
+        this.maxMessageAge = config?.messageProcessing?.maxMessageAge || 30;
         this.setupMessageHandler();
     }
 
@@ -406,10 +413,43 @@ class WhatsAppAnimeBot {
 
     async clearGroupChat(groupId) {
         try {
-            // Use chatModify to clear all messages in the group
-            await this.sock.chatModify({ clear: 'all' }, groupId);
+            console.log(`🧹 Clearing chat for group: ${groupId}`);
+            
+            // Method 1: Try to clear using chatModify
+            try {
+                await this.sock.chatModify({ clear: 'all' }, groupId);
+                console.log('✅ Chat cleared using chatModify');
+                return;
+            } catch (error) {
+                console.log('⚠️ chatModify failed, trying alternative method...');
+            }
+            
+            // Method 2: Try to delete messages by fetching and deleting them
+            try {
+                const messages = await this.sock.fetchMessages(groupId, 100);
+                if (messages && messages.length > 0) {
+                    const messageKeys = messages.map(msg => msg.key);
+                    await this.sock.deleteMessages(groupId, messageKeys);
+                    console.log(`✅ Deleted ${messageKeys.length} messages`);
+                } else {
+                    console.log('ℹ️ No messages found to delete');
+                }
+            } catch (error) {
+                console.log('⚠️ Message deletion failed:', error.message);
+            }
+            
+            // Method 3: Send a system message to indicate chat is cleared
+            try {
+                await this.sock.sendMessage(groupId, { 
+                    text: '🧹 Chat has been cleared for the bot session.' 
+                });
+                console.log('✅ Sent clear notification message');
+            } catch (error) {
+                console.log('⚠️ Failed to send clear notification:', error.message);
+            }
+            
         } catch (error) {
-            console.error('Error clearing group chat:', error.message);
+            console.error('❌ Error clearing group chat:', error.message);
         }
     }
 
@@ -427,26 +467,73 @@ class WhatsAppAnimeBot {
                     const chatId = message.key.remoteJid;
                     const senderNumber = message.key.participant || message.key.remoteJid?.split('@')[0];
                     const messageTimestamp = message.messageTimestamp || 0;
+                    const messageId = message.key.id;
+
+                    // Rate limiting to prevent spam
+                    const currentTime = Date.now();
+                    if (currentTime - this.lastMessageTime < this.minMessageInterval) {
+                        continue;
+                    }
 
                     // If bot is active, ignore messages older than the activation timestamp
                     if (this.isActive && this.activationTimestamp && messageTimestamp < this.activationTimestamp) {
                         continue;
                     }
 
-                    const messageId = `${chatId}-${message.key.id}-${messageTimestamp}`;
-                    if (this.processedMessages.has(messageId)) continue;
-                    this.processedMessages.add(messageId);
-                    if (this.processedMessages.size > 200) {
-                        this.processedMessages.delete(this.processedMessages.values().next().value);
+                    // Enhanced message deduplication
+                    const messageKey = `${chatId}-${messageId}-${messageTimestamp}`;
+                    if (this.processedMessages.has(messageKey)) continue;
+                    
+                    // Check if message is too old
+                    const currentTimeSeconds = Math.floor(Date.now() / 1000);
+                    if (currentTimeSeconds - messageTimestamp > this.maxMessageAge) {
+                        console.log(`[SKIP] Message too old: ${messageId}`);
+                        continue;
                     }
 
-                    const currentTime = Math.floor(Date.now() / 1000);
-                    if (currentTime - messageTimestamp > 30) continue;
+                    // Check if message is already being processed
+                    if (this.messageProcessingQueue.has(messageId)) {
+                        console.log(`[SKIP] Message already being processed: ${messageId}`);
+                        continue;
+                    }
 
-                    console.log(`[MSG] Processing: ${senderNumber} in ${chatId} | Content: ${msgContent}`);
-                    await this.handleCommand(msgContent, senderNumber, chatId);
+                    this.processedMessages.add(messageKey);
+                    this.messageProcessingQueue.set(messageId, Date.now());
+                    
+                    // Clean up old processed messages
+                    if (this.processedMessages.size > this.maxProcessedMessages) {
+                        const firstKey = this.processedMessages.values().next().value;
+                        this.processedMessages.delete(firstKey);
+                    }
+
+                    // Clean up old processing queue entries
+                    for (const [id, timestamp] of this.messageProcessingQueue.entries()) {
+                        if (Date.now() - timestamp > this.queueTimeout) {
+                            this.messageProcessingQueue.delete(id);
+                        }
+                    }
+
+                    this.lastMessageTime = currentTime;
+
+                    console.log(`[MSG] Processing: ${senderNumber} in ${chatId} | Content: ${msgContent.substring(0, 50)}...`);
+                    
+                    // Process message with timeout
+                    const processingPromise = this.handleCommand(msgContent, senderNumber, chatId);
+                    const timeoutPromise = new Promise((_, reject) => 
+                        setTimeout(() => reject(new Error('Message processing timeout')), this.messageTimeout)
+                    );
+                    
+                    try {
+                        await Promise.race([processingPromise, timeoutPromise]);
+                    } catch (error) {
+                        console.error(`❌ Error processing message ${messageId}:`, error.message);
+                    } finally {
+                        // Remove from processing queue
+                        this.messageProcessingQueue.delete(messageId);
+                    }
+                    
                 } catch (error) {
-                    console.error(`❌ Error processing message:`, error);
+                    console.error(`❌ Error in message handler:`, error);
                 }
             }
         };
@@ -467,9 +554,22 @@ class WhatsAppAnimeBot {
                 }
                 let groupsList = '📋 **Available Groups:**\n';
                 groups.forEach((group, index) => {
-                    groupsList += `${index + 1}. ${group.name} (${group.participants} members)\n`;
+                    const isSelected = this.selectedGroup === group.id;
+                    const status = isSelected ? '✅ (Selected)' : '';
+                    groupsList += `${index + 1}. ${group.name} (${group.participants} members) ${status}\n`;
                 });
-                groupsList += '\nReply with the group number to activate the bot in that group.';
+                groupsList += '\n📝 **Commands:**';
+                groupsList += '\n• Reply with a number to activate bot in that group';
+                groupsList += '\n• `.clear` or `.مسح` - Clear the selected group chat';
+                groupsList += '\n• `.x` or `.وقف` - Deactivate the bot';
+                groupsList += '\n• `.status` or `.حالة` - Check bot status';
+                
+                if (this.isActive) {
+                    groupsList += `\n\n🤖 **Bot Status:** Active in selected group`;
+                } else {
+                    groupsList += `\n\n🤖 **Bot Status:** Inactive - Select a group to activate`;
+                }
+                
                 await this.sock.sendMessage(chatId, { text: groupsList });
                 return;
             }
@@ -477,7 +577,19 @@ class WhatsAppAnimeBot {
             if (command === '.x' || command === '.وقف') {
                 this.isActive = false;
                 this.selectedGroup = null;
+                this.activationTimestamp = null; // Reset timestamp on deactivation
                 await this.sock.sendMessage(chatId, { text: '🔴 Bot deactivated successfully!' });
+                return;
+            }
+
+            if (command === '.clear' || command === '.مسح') {
+                if (this.selectedGroup) {
+                    await this.sock.sendMessage(chatId, { text: '🧹 Clearing group chat...' });
+                    await this.clearGroupChat(this.selectedGroup);
+                    await this.sock.sendMessage(chatId, { text: '✅ Group chat cleared successfully!' });
+                } else {
+                    await this.sock.sendMessage(chatId, { text: '❌ No group selected. Use .ابدا first to select a group.' });
+                }
                 return;
             }
 
@@ -485,13 +597,42 @@ class WhatsAppAnimeBot {
                 const groups = await this.getGroupsList();
                 const selectedIndex = parseInt(command) - 1;
                 if (selectedIndex >= 0 && selectedIndex < groups.length) {
-                    this.selectedGroup = groups[selectedIndex].id;
-                    this.isActive = true;
-                    this.activationTimestamp = Math.floor(Date.now() / 1000); // Set activation time
-                    await this.clearGroupChat(this.selectedGroup);
+                    const selectedGroup = groups[selectedIndex];
+                    
+                    // Send initial activation message
                     await this.sock.sendMessage(chatId, {
-                        text: `✅ Bot activated in: **${groups[selectedIndex].name}**\n\nChat cleared and bot is now active in this group.`
+                        text: `🔄 Activating bot in: **${selectedGroup.name}**\n\nClearing chat and setting up bot session...`
                     });
+                    
+                    try {
+                        // Clear the group chat first
+                        await this.clearGroupChat(selectedGroup.id);
+                        
+                        // Set bot as active
+                        this.selectedGroup = selectedGroup.id;
+                        this.isActive = true;
+                        this.activationTimestamp = Math.floor(Date.now() / 1000);
+                        
+                        // Send success message
+                        await this.sock.sendMessage(chatId, {
+                            text: `✅ Bot successfully activated in: **${selectedGroup.name}**\n\n🧹 Chat has been cleared\n🤖 Bot is now active and ready to detect anime characters!`
+                        });
+                        
+                        // Send a message to the group to announce bot activation
+                        await this.sock.sendMessage(selectedGroup.id, {
+                            text: `🤖 Anime Character Detector Bot is now active!\n\nSend messages with anime character names wrapped in asterisks like:\n*ناروتو* *ساكورا* *ساسكي*`
+                        });
+                        
+                    } catch (error) {
+                        console.error('❌ Error during bot activation:', error);
+                        await this.sock.sendMessage(chatId, {
+                            text: `❌ Failed to activate bot in ${selectedGroup.name}: ${error.message}`
+                        });
+                        // Reset state on error
+                        this.selectedGroup = null;
+                        this.isActive = false;
+                        this.activationTimestamp = null;
+                    }
                 } else {
                     await this.sock.sendMessage(chatId, { text: '❌ Invalid group number!' });
                 }
@@ -506,24 +647,52 @@ class WhatsAppAnimeBot {
             return;
         }
 
-        // Character detection logic
+        // Character detection logic with improved error handling
         if (this.isActive && (!this.selectedGroup || chatId === this.selectedGroup)) {
-            const result = await this.animeBot.processMessage({ body: msgContent });
-            if (result?.learnedCharacters?.length > 0) {
-                const responseData = this.animeBot.formatResponse(result);
-                if (responseData?.text) {
-                    const delay = this.animeBot.getAdaptiveDelay(responseData.characterCount, responseData.isMistake, responseData.mistakeType);
-                    await this.animeBot.sleep(delay);
-                    await this.sock.sendMessage(chatId, { text: responseData.text });
-
-                    // The mistake correction logic has been removed as requested.
+            try {
+                const result = await this.animeBot.processMessage({ body: msgContent });
+                if (result?.learnedCharacters?.length > 0) {
+                    const responseData = this.animeBot.formatResponse(result);
+                    if (responseData?.text) {
+                        const delay = this.animeBot.getAdaptiveDelay(responseData.characterCount, responseData.isMistake, responseData.mistakeType);
+                        
+                        // Add small random delay to prevent message flooding
+                        const randomDelay = Math.random() * 500;
+                        await this.animeBot.sleep(delay + randomDelay);
+                        
+                        // Send message with retry logic
+                        let retryCount = 0;
+                        const maxRetries = 2;
+                        
+                        while (retryCount < maxRetries) {
+                            try {
+                                await this.sock.sendMessage(chatId, { text: responseData.text });
+                                break; // Success, exit retry loop
+                            } catch (error) {
+                                retryCount++;
+                                console.error(`❌ Failed to send message (attempt ${retryCount}/${maxRetries}):`, error.message);
+                                
+                                if (retryCount >= maxRetries) {
+                                    console.error('❌ Max retries reached for sending message');
+                                    break;
+                                }
+                                
+                                // Wait before retry
+                                await this.animeBot.sleep(1000 * retryCount);
+                            }
+                        }
+                    }
                 }
+            } catch (error) {
+                console.error('❌ Error in character detection:', error.message);
             }
         }
     }
 
     cleanup() {
         if (this.messageHandler) this.sock.ev.off('messages.upsert', this.messageHandler);
+        this.messageProcessingQueue.clear();
+        this.processedMessages.clear();
     }
 
     getStatus() {

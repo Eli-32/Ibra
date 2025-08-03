@@ -5,14 +5,17 @@
     "main": "anime-bot.js",
     "type": "module",
     "dependencies": {
-        "@whiskeysockets/baileys": "^6.7.8",
+        "@whiskeysockets/baileys": "latest",
         "axios": "^1.10.0",
         "express": "^5.1.0",
+        "node-fetch": "^3.3.2",
         "pino": "^9.7.0",
         "qrcode-terminal": "^0.12.0",
         "qrcode": "^1.5.3"
     },
     "scripts": {
-        "start": "node anime-bot.js"
+        "start": "node anime-bot.js",
+        "monitor": "node monitor.js",
+        "monitor:watch": "node monitor.js --watch"
     }
 }
