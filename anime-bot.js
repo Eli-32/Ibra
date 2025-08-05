@@ -222,12 +222,14 @@ async function startBot() {
       printQRInTerminal: false,
       logger: pino({ 
         level: process.env.NODE_ENV === 'production' ? 'error' : 'info',
-        transport: {
-          target: 'pino-pretty',
-          options: {
-            colorize: true
+        ...(process.env.NODE_ENV !== 'production' && {
+          transport: {
+            target: 'pino-pretty',
+            options: {
+              colorize: true
+            }
           }
-        }
+        })
       }),
       browser: ['Anime Detector Bot', 'Chrome', '1.0.0'],
       
