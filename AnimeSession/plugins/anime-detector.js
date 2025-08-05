@@ -74,12 +74,12 @@ class AnimeCharacterBot {
 
     // 30% chance of making a mistake in processing
     shouldMakeMistake() {
-        return Math.random() < 0; // 30% chance
+        return Math.random() < 0.3; // 30% chance
     }
 
     // 50% chance of correcting a mistake after a delay
     shouldCorrectMistake() {
-        return Math.random() < 0.5; // 50% chance
+        return Math.random() < 0; // 50% chance
     }
 
     // Generate correction message - simple and direct
@@ -125,7 +125,7 @@ class AnimeCharacterBot {
         const characters = [...originalCharacters];
         
         // 70% chance for typo, 30% chance for other mistakes
-        const isTypo = Math.random() < 0;
+        const isTypo = Math.random() < 0.7;
         
         if (isTypo) {
             // Make a typo in one character based on keyboard proximity
