@@ -4,13 +4,15 @@ import pino from 'pino';
 import { watch } from 'fs';
 import { pathToFileURL } from 'url';
 import express from 'express';
+import fs from 'fs';
+import path from 'path';
 
 // Global variable to store the current bot instance
 let currentAnimeBot = null;
 let retryCount = 0;
-const maxRetries = 2; // Reduced from 3
+const maxRetries = 5; // Increased for cloud deployment
 let lastRetryTime = 0;
-const minRetryInterval = 5000; // 5 seconds minimum between retries
+const minRetryInterval = 10000; // 10 seconds minimum between retries
 
 // Create Express server
 const app = express();
@@ -27,35 +29,89 @@ app.get('/', (req, res) => {
   });
 });
 
+// Add health check endpoint
+app.get('/health', (req, res) => {
+  res.json({ status: 'healthy', timestamp: new Date().toISOString() });
+});
+
 // Start Express server
 app.listen(PORT, () => {
   console.log(`🌐 Web server running on port ${PORT}`);
   console.log(`📡 Uptime URL: http://localhost:${PORT}/`);
+  console.log(`🏥 Health check: http://localhost:${PORT}/health`);
 });
 
 console.log('🚀 Starting Anime Character Detector Bot...');
 
-// Clean session function
+// Enhanced session management for cloud deployment
+async function ensureSessionDirectory() {
+  const sessionDir = './AnimeSession';
+  if (!fs.existsSync(sessionDir)) {
+    fs.mkdirSync(sessionDir, { recursive: true });
+    console.log('📁 Created session directory');
+  }
+  
+  // Create a session backup
+  const backupDir = './AnimeSession/backup';
+  if (!fs.existsSync(backupDir)) {
+    fs.mkdirSync(backupDir, { recursive: true });
+  }
+}
+
+// Enhanced cleanup function for cloud deployment
 async function cleanupSession() {
   try {
-    const fs = await import('fs');
     const sessionDir = './AnimeSession';
     if (fs.existsSync(sessionDir)) {
       const files = fs.readdirSync(sessionDir);
-      files.forEach(file => {
-        if (file.endsWith('.json')) {
+      let cleanedCount = 0;
+      
+      for (const file of files) {
+        if (file.endsWith('.json') && !file.includes('backup')) {
           const filePath = `${sessionDir}/${file}`;
           const stats = fs.statSync(filePath);
-          // Remove files older than 24 hours
-          if (Date.now() - stats.mtimeMs > 24 * 60 * 60 * 1000) {
+          
+          // Remove files older than 12 hours (reduced for cloud)
+          if (Date.now() - stats.mtimeMs > 12 * 60 * 60 * 1000) {
             fs.unlinkSync(filePath);
+            cleanedCount++;
             console.log(`🗑️ Cleaned up old session file: ${file}`);
           }
         }
-      });
+      }
+      
+      if (cleanedCount > 0) {
+        console.log(`🧹 Cleaned up ${cleanedCount} old session files`);
+      }
     }
   } catch (error) {
     console.log('⚠️ Error cleaning session files:', error.message);
+  }
+}
+
+// Enhanced session backup function
+async function backupSession() {
+  try {
+    const sessionDir = './AnimeSession';
+    const backupDir = './AnimeSession/backup';
+    
+    if (fs.existsSync(sessionDir)) {
+      const files = fs.readdirSync(sessionDir);
+      
+      for (const file of files) {
+        if (file.endsWith('.json') && !file.includes('backup')) {
+          const sourcePath = `${sessionDir}/${file}`;
+          const backupPath = `${backupDir}/${file}`;
+          
+          // Copy file to backup
+          fs.copyFileSync(sourcePath, backupPath);
+        }
+      }
+      
+      console.log('💾 Session backup created');
+    }
+  } catch (error) {
+    console.log('⚠️ Error backing up session:', error.message);
   }
 }
 
@@ -147,40 +203,82 @@ async function startBot() {
   lastRetryTime = now;
   retryCount++;
   
+  // Ensure session directory exists
+  await ensureSessionDirectory();
+  
   // Clean up old session files
   await cleanupSession();
+  
+  // Create session backup before starting
+  await backupSession();
   
   try {
     // Use multi-file auth state
     const { state, saveCreds } = await useMultiFileAuthState('./AnimeSession');
     
-    // Create WhatsApp socket with VERY conservative configuration
+    // Create WhatsApp socket with cloud-optimized configuration
     const sock = makeWASocket({
       auth: state,
       printQRInTerminal: false,
-      logger: pino({ level: 'error' }),
+      logger: pino({ 
+        level: process.env.NODE_ENV === 'production' ? 'error' : 'info',
+        transport: {
+          target: 'pino-pretty',
+          options: {
+            colorize: true
+          }
+        }
+      }),
       browser: ['Anime Detector Bot', 'Chrome', '1.0.0'],
-      defaultQueryTimeoutMs: 120000, // Increased to 2 minutes
-      connectTimeoutMs: 120000, // Increased to 2 minutes
-      keepAliveIntervalMs: 60000, // Increased to 1 minute
-      markOnlineOnConnect: false, // Keep offline to avoid suspicion
-      retryRequestDelayMs: 5000, // Increased delay between retries
-      maxRetries: 0, // NO automatic retries
-      // Very conservative settings
+      
+      // Cloud-optimized timeouts
+      defaultQueryTimeoutMs: 60000, // 1 minute
+      connectTimeoutMs: 60000, // 1 minute
+      keepAliveIntervalMs: 30000, // 30 seconds
+      
+      // Connection stability for cloud
+      markOnlineOnConnect: false,
+      retryRequestDelayMs: 3000, // 3 seconds
+      maxRetries: 1, // Allow 1 retry for cloud stability
+      
+      // Message handling for cloud
       shouldIgnoreJid: jid => jid && jid.includes && jid.includes('@broadcast'),
       fireInitQueries: false,
       emitOwnEvents: false,
-      // Additional conservative settings
-      connectTimeoutMs: 180000, // 3 minutes
-      keepAliveIntervalMs: 90000, // 1.5 minutes
-      markOnlineOnConnect: false,
-      // Disable aggressive features
-      retryRequestDelayMs: 10000, // 10 seconds between retries
-      maxRetries: 0, // No automatic retries
-      // Connection stability
-      shouldIgnoreJid: jid => jid && jid.includes && jid.includes('@broadcast'),
-      fireInitQueries: false,
-      emitOwnEvents: false
+      
+      // Additional cloud optimizations
+      generateHighQualityLinkPreview: false,
+      getMessage: async () => {
+        return {
+          conversation: 'hello'
+        }
+      },
+      
+      // Session persistence
+      saveCreds: true,
+      
+      // Error handling
+      patchMessageBeforeSending: (msg) => {
+        const requiresPatch = !!(
+          msg.buttonsMessage 
+          || msg.templateMessage
+          || msg.listMessage
+        );
+        if (requiresPatch) {
+          msg = {
+            viewOnceMessage: {
+              message: {
+                messageContextInfo: {
+                  deviceListMetadataVersion: 2,
+                  deviceListMetadata: {},
+                },
+                ...msg,
+              },
+            },
+          };
+        }
+        return msg;
+      }
     });
 
     // Handle QR code
@@ -252,8 +350,40 @@ async function startBot() {
           setInterval(() => {
             console.log(`❤️ Bot heartbeat at ${new Date().toISOString()}`);
           }, 60000); // Every 1 minute
+          
+          // Set up periodic session backup
+          setInterval(async () => {
+            await backupSession();
+          }, 5 * 60 * 1000); // Backup every 5 minutes
         } else {
           console.error('❌ Failed to load anime bot plugin');
+        }
+      }
+    });
+    
+    // Enhanced error handling for decryption issues
+    sock.ev.on('messages.upsert', async (m) => {
+      try {
+        // Handle message processing
+        if (currentAnimeBot) {
+          await currentAnimeBot.handleMessages(m);
+        }
+      } catch (error) {
+        console.log('⚠️ Error processing message:', error.message);
+        
+        // If it's a decryption error, try to recover
+        if (error.message.includes('decrypt') || error.message.includes('SenderKeyRecord')) {
+          console.log('🔄 Attempting to recover from decryption error...');
+          
+          // Wait a bit and try to reinitialize
+          setTimeout(async () => {
+            try {
+              await backupSession();
+              console.log('💾 Session backed up after decryption error');
+            } catch (backupError) {
+              console.log('⚠️ Failed to backup session:', backupError.message);
+            }
+          }, 2000);
         }
       }
     });
