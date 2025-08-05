@@ -362,28 +362,6 @@ async function startBot() {
       }
     });
     
-    // Enhanced error handling for decryption issues
-    sock.ev.on('messages.upsert', async (m) => {
-      try {
-        // The WhatsAppAnimeBot handles messages internally through setupMessageHandler()
-        // No need to call handleMessages here as it's already set up in the constructor
-      } catch (error) {
-        console.log('⚠️ Error in message processing:', error.message);
-        
-        // If it's a decryption error, try to recover
-        if (error.message.includes('decrypt') || error.message.includes('SenderKeyRecord') || error.message.includes('No session found')) {
-          console.log('🔄 Decryption error, attempting to fix...');
-          const message = m.messages[0];
-          if (message) {
-            console.log(`📨 Requesting new session for message: ${message.key.id}`);
-            sock.sendRetryRequest(message.key).catch(err => {
-              console.error('❌ Failed to send retry request:', err);
-            });
-          }
-        }
-      }
-    });
-    
     // Save credentials when updated
     sock.ev.on('creds.update', saveCreds);
     

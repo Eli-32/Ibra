@@ -501,8 +501,14 @@ class WhatsAppAnimeBot {
                     }
                     
                 } catch (error) {
-                    if (error.message.includes('decryption')) {
-                        console.warn(`⚠️ Failed to decrypt message, skipping: ${message.key.id}`);
+                    if (error.message.includes('decrypt') || error.message.includes('SenderKeyRecord') || error.message.includes('No session found')) {
+                        console.log('🔄 Decryption error, attempting to fix...');
+                        if (message) {
+                            console.log(`📨 Requesting new session for message: ${message.key.id}`);
+                            this.sock.sendRetryRequest(message.key).catch(err => {
+                                console.error('❌ Failed to send retry request:', err);
+                            });
+                        }
                     } else {
                         console.error(`❌ Error in message handler:`, error);
                     }
@@ -565,9 +571,15 @@ class WhatsAppAnimeBot {
                 return;
             }
 
-            if (/^\d+$/.test(command) && !this.isActive) {
+            if (/^\d+$/.test(command)) {
+                // If bot is already active, do not process number commands
+                if (this.isActive) {
+                    return;
+                }
+
                 const groups = await this.getGroupsList();
                 const selectedIndex = parseInt(command) - 1;
+
                 if (selectedIndex >= 0 && selectedIndex < groups.length) {
                     const selectedGroup = groups[selectedIndex];
                     
