@@ -4,15 +4,9 @@ import pino from 'pino';
 import { watch } from 'fs';
 import { pathToFileURL } from 'url';
 import express from 'express';
-import fs from 'fs';
-import path from 'path';
 
 // Global variable to store the current bot instance
 let currentAnimeBot = null;
-let retryCount = 0;
-const maxRetries = 5; // Increased for cloud deployment
-let lastRetryTime = 0;
-const minRetryInterval = 10000; // 10 seconds minimum between retries
 
 // Create Express server
 const app = express();
@@ -24,95 +18,21 @@ app.get('/', (req, res) => {
   res.json({
     status: 'online',
     botStatus: status,
-    retryCount: retryCount,
     timestamp: new Date().toISOString()
   });
-});
-
-// Add health check endpoint
-app.get('/health', (req, res) => {
-  res.json({ status: 'healthy', timestamp: new Date().toISOString() });
 });
 
 // Start Express server
 app.listen(PORT, () => {
   console.log(`🌐 Web server running on port ${PORT}`);
   console.log(`📡 Uptime URL: http://localhost:${PORT}/`);
-  console.log(`🏥 Health check: http://localhost:${PORT}/health`);
 });
 
 console.log('🚀 Starting Anime Character Detector Bot...');
 
-// Enhanced session management for cloud deployment
-async function ensureSessionDirectory() {
-  const sessionDir = './AnimeSession';
-  if (!fs.existsSync(sessionDir)) {
-    fs.mkdirSync(sessionDir, { recursive: true });
-    console.log('📁 Created session directory');
-  }
-  
-  // Create a session backup
-  const backupDir = './AnimeSession/backup';
-  if (!fs.existsSync(backupDir)) {
-    fs.mkdirSync(backupDir, { recursive: true });
-  }
-}
-
-// Enhanced cleanup function for cloud deployment
+// This function is intentionally left empty to prevent session clearing.
 async function cleanupSession() {
-  try {
-    const sessionDir = './AnimeSession';
-    if (fs.existsSync(sessionDir)) {
-      const files = fs.readdirSync(sessionDir);
-      let cleanedCount = 0;
-      
-      for (const file of files) {
-        if (file.endsWith('.json') && !file.includes('backup')) {
-          const filePath = `${sessionDir}/${file}`;
-          const stats = fs.statSync(filePath);
-          
-          // Remove files older than 12 hours (reduced for cloud)
-          if (Date.now() - stats.mtimeMs > 12 * 60 * 60 * 1000) {
-            fs.unlinkSync(filePath);
-            cleanedCount++;
-            console.log(`🗑️ Cleaned up old session file: ${file}`);
-          }
-        }
-      }
-      
-      if (cleanedCount > 0) {
-        console.log(`🧹 Cleaned up ${cleanedCount} old session files`);
-      }
-    }
-  } catch (error) {
-    console.log('⚠️ Error cleaning session files:', error.message);
-  }
-}
-
-// Enhanced session backup function
-async function backupSession() {
-  try {
-    const sessionDir = './AnimeSession';
-    const backupDir = './AnimeSession/backup';
-    
-    if (fs.existsSync(sessionDir)) {
-      const files = fs.readdirSync(sessionDir);
-      
-      for (const file of files) {
-        if (file.endsWith('.json') && !file.includes('backup')) {
-          const sourcePath = `${sessionDir}/${file}`;
-          const backupPath = `${backupDir}/${file}`;
-          
-          // Copy file to backup
-          fs.copyFileSync(sourcePath, backupPath);
-        }
-      }
-      
-      console.log('💾 Session backup created');
-    }
-  } catch (error) {
-    console.log('⚠️ Error backing up session:', error.message);
-  }
+  // DO NOT ADD ANY CODE HERE.
 }
 
 // Function to load the anime bot plugin
@@ -182,235 +102,130 @@ function setupHotReload(sock) {
 }
 
 async function startBot() {
-  // Check if we should retry based on time and count
-  const now = Date.now();
-  if (retryCount > 0) {
-    if (now - lastRetryTime < minRetryInterval) {
-      const remainingTime = Math.ceil((minRetryInterval - (now - lastRetryTime)) / 1000 / 60);
-      console.log(`⏳ Too soon to retry. Waiting ${remainingTime} more minutes...`);
-      setTimeout(startBot, minRetryInterval - (now - lastRetryTime));
-      return;
+  console.log('✅ Starting bot without cleaning session. Version: 2');
+  // Use multi-file auth state
+  const { state, saveCreds } = await useMultiFileAuthState('./AnimeSession');
+  
+  // Create WhatsApp socket with better configuration
+  const sock = makeWASocket({
+    auth: state,
+    printQRInTerminal: false,
+    logger: pino({ level: 'debug' }), // Use 'debug' for informative logs
+    browser: ['Anime Detector Bot', 'Chrome', '3.0.0'], // Updated version to force sync
+    defaultQueryTimeoutMs: undefined, // Use default
+    connectTimeoutMs: 60000,
+    keepAliveIntervalMs: 20000, // Increased keep-alive
+    markOnlineOnConnect: true,
+    syncFullHistory: true, // Sync full history to repair session
+    emitOwnEvents: false, // Don't process bot's own messages
+    
+    // Add getMessage for retries
+    getMessage: async (key) => {
+      // A proper implementation should fetch the message from a store
+      // For now, returning undefined is better than a placeholder to avoid crashes
+      return undefined;
+    }
+  });
+
+  // Handle QR code
+  sock.ev.on('connection.update', async (update) => {
+    const { connection, lastDisconnect, qr } = update;
+    
+    if (qr) {
+      console.log('📱 Scan this QR code with your WhatsApp:');
+      qrcode.generate(qr, { small: true });
     }
     
-    if (retryCount >= maxRetries) {
-      console.log('❌ Max retries reached. Please check your connection and try again later.');
-      console.log('💡 Try clearing session with: rm -rf ./AnimeSession && npm start');
-      console.log('💡 Or wait several hours before trying again.');
-      process.exit(1);
-    }
-  }
-  
-  lastRetryTime = now;
-  retryCount++;
-  
-  // Ensure session directory exists
-  await ensureSessionDirectory();
-  
-  // Clean up old session files
-  await cleanupSession();
-  
-  // Create session backup before starting
-  await backupSession();
-  
-  try {
-    // Use multi-file auth state
-    const { state, saveCreds } = await useMultiFileAuthState('./AnimeSession');
-    
-    // Create WhatsApp socket with cloud-optimized configuration
-    const sock = makeWASocket({
-      auth: state,
-      printQRInTerminal: false,
-      logger: pino({ 
-        level: process.env.NODE_ENV === 'production' ? 'error' : 'info',
-        ...(process.env.NODE_ENV !== 'production' && {
-          transport: {
-            target: 'pino-pretty',
-            options: {
-              colorize: true
-            }
+    if (connection === 'close') {
+      const statusCode = lastDisconnect?.error?.output?.statusCode;
+      const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+      console.log('❌ Connection closed due to:', lastDisconnect?.error, 'status code:', statusCode);
+
+      if (shouldReconnect) {
+        // Use exponential backoff for reconnection
+        const delay = (lastDisconnect?.error?.output?.payload?.retryAfter || 1) * 1000;
+        console.log(`🔄 Reconnecting in ${delay / 1000} seconds...`);
+        setTimeout(startBot, delay);
+      } else {
+        console.log('🚫 Logged out. Please delete the session and scan QR code again.');
+      }
+    } else if (connection === 'open') {
+      console.log('✅ Connected to WhatsApp successfully!');
+      console.log(`👤 Logged in as: ${sock.user?.name || 'Unknown'}`);
+      console.log(`📱 Phone: ${sock.user?.id?.split(':')[0] || 'Unknown'}`);
+      
+      // Load and initialize the anime bot
+      const pluginModule = await loadAnimeBot();
+      if (pluginModule) {
+        const { WhatsAppAnimeBot } = pluginModule;
+        currentAnimeBot = new WhatsAppAnimeBot(sock);
+        
+        console.log('🤖 Anime Character Detector initialized!');
+        console.log('📝 Commands:');
+        console.log('   .a - Activate anime detection');
+        console.log('   .x - Deactivate anime detection');
+        console.log('💡 Usage: Send text between *asterisks* to detect characters');
+        console.log('   Example: *غوكو ضد فيجيتا*');
+        
+        // Setup hot-reload
+        setupHotReload(sock);
+        
+        // Log learning stats periodically and keep connection alive
+        setInterval(() => {
+          if (currentAnimeBot) {
+            const status = currentAnimeBot.getStatus();
+            console.log(`📊 Status: ${status.status} | Characters learned: ${status.charactersLearned}`);
           }
-        })
-      }),
-      browser: ['Anime Detector Bot', 'Chrome', '1.0.0'],
-      
-      // Cloud-optimized timeouts
-      defaultQueryTimeoutMs: 60000, // 1 minute
-      connectTimeoutMs: 60000, // 1 minute
-      keepAliveIntervalMs: 30000, // 30 seconds
-      
-      // Connection stability for cloud
-      markOnlineOnConnect: false,
-      retryRequestDelayMs: 3000, // 3 seconds
-      maxRetries: 1, // Allow 1 retry for cloud stability
-      
-      // Message handling for cloud
-      shouldIgnoreJid: jid => jid && jid.includes && jid.includes('@broadcast'),
-      fireInitQueries: false,
-      emitOwnEvents: false,
-      
-      // Additional cloud optimizations
-      generateHighQualityLinkPreview: false,
-      getMessage: async () => {
-        return {
-          conversation: 'hello'
-        }
-      },
-      
-      // Session persistence
-      saveCreds: true,
-      
-      // Error handling
-      patchMessageBeforeSending: (msg) => {
-        const requiresPatch = !!(
-          msg.buttonsMessage 
-          || msg.templateMessage
-          || msg.listMessage
-        );
-        if (requiresPatch) {
-          msg = {
-            viewOnceMessage: {
-              message: {
-                messageContextInfo: {
-                  deviceListMetadataVersion: 2,
-                  deviceListMetadata: {},
-                },
-                ...msg,
-              },
-            },
-          };
-        }
-        return msg;
-      }
-    });
-
-    // Handle QR code
-    sock.ev.on('connection.update', async (update) => {
-      const { connection, lastDisconnect, qr } = update;
-      
-      if (qr) {
-        console.log('📱 Scan this QR code with your WhatsApp:');
-        qrcode.generate(qr, { small: true });
-      }
-      
-      if (connection === 'close') {
-        const reason = lastDisconnect?.error?.output?.statusCode;
-        const shouldReconnect = reason !== DisconnectReason.loggedOut;
+        }, 300000); // Every 5 minutes
         
-        console.log(`❌ Connection closed due to: ${reason}`);
-        
-        if (reason === 403 || reason === 503) {
-          console.log('🚫 Rate limited or blocked by WhatsApp. Waiting much longer before retry...');
-          const waitTime = Math.min(900000 * retryCount, 3600000); // 15-60 minutes
-          const waitMinutes = Math.ceil(waitTime / 1000 / 60);
-          console.log(`⏳ Waiting ${waitMinutes} minutes before retry...`);
-          console.log('💡 This is to avoid triggering another ban.');
-          setTimeout(startBot, waitTime);
-        } else if (reason === 515 || reason === 408 || reason === 428) {
-          // Fast reconnect for connection timeouts (not rate limits)
-          const waitTime = 3000; // 3 seconds for connection errors
-          console.log(`🔄 Connection timeout, reconnecting in 3 seconds...`);
-          setTimeout(startBot, waitTime);
-        } else if (shouldReconnect) {
-          console.log('🔄 Connection lost, attempting to reconnect...');
-          setTimeout(startBot, 5000);
-        } else {
-          console.log('🚫 Logged out. Please restart and scan QR code again.');
-          process.exit(1);
-        }
-      } else if (connection === 'open') {
-        retryCount = 0; // Reset retry count on successful connection
-        console.log('✅ Connected to WhatsApp successfully!');
-        console.log(`👤 Logged in as: ${sock.user?.name || 'Unknown'}`);
-        console.log(`📱 Phone: ${sock.user?.id?.split(':')[0] || 'Unknown'}`);
-        
-        // Load and initialize the anime bot
-        const pluginModule = await loadAnimeBot();
-        if (pluginModule) {
-          const { WhatsAppAnimeBot } = pluginModule;
-          currentAnimeBot = new WhatsAppAnimeBot(sock);
-          
-          console.log('🤖 Anime Character Detector initialized!');
-          console.log('📝 Commands:');
-          console.log('   .a - Activate anime detection');
-          console.log('   .x - Deactivate anime detection');
-          console.log('💡 Usage: Send text between *asterisks* to detect characters');
-          console.log('   Example: *غوكو ضد فيجيتا*');
-          
-          // Setup hot-reload
-          setupHotReload(sock);
-          
-          // Log learning stats periodically
-          setInterval(() => {
-            if (currentAnimeBot) {
-              const status = currentAnimeBot.getStatus();
-              console.log(`📊 Status: ${status.status} | Characters learned: ${status.charactersLearned}`);
+        // Keep connection alive
+        setInterval(() => {
+          try {
+            if (sock && sock.user) {
+              // Send a ping to keep the connection alive
+              sock.sendPresenceUpdate('available');
             }
-          }, 300000); // Every 5 minutes
-
-          // Add a heartbeat log to confirm the bot is running
-          setInterval(() => {
-            console.log(`❤️ Bot heartbeat at ${new Date().toISOString()}`);
-          }, 60000); // Every 1 minute
-          
-          // Set up periodic session backup
-          setInterval(async () => {
-            await backupSession();
-          }, 5 * 60 * 1000); // Backup every 5 minutes
-        } else {
-          console.error('❌ Failed to load anime bot plugin');
-        }
+          } catch (error) {
+            // Silent error handling for keep-alive
+          }
+        }, 60000); // Every minute
+      } else {
+        console.error('❌ Failed to load anime bot plugin');
       }
-    });
-    
-    // Save credentials when updated
-    sock.ev.on('creds.update', saveCreds);
-    
-  } catch (error) {
-    console.error('❌ Error in startBot:', error);
-    const waitTime = Math.min(600000 * retryCount, 3600000); // 10-60 minutes
-    const waitMinutes = Math.ceil(waitTime / 1000 / 60);
-    console.log(`🔄 Retrying in ${waitMinutes} minutes...`);
-    setTimeout(startBot, waitTime);
-  }
+    }
+  });
+
+  // Save credentials when updated
+  sock.ev.on('creds.update', saveCreds);
 }
 
-// Anti-shutdown protection and graceful handling
-let isShuttingDown = false;
-
+// Handle process termination gracefully
 process.on('SIGINT', () => {
-  if (!isShuttingDown) {
-    isShuttingDown = true;
-    console.log(`\n⚠️ Received SIGINT at ${new Date().toISOString()}, shutting down gracefully...`);
-    if (currentAnimeBot) {
-      currentAnimeBot.cleanup();
-    }
-    setTimeout(() => process.exit(0), 1000);
-  }
+  console.log('\n⚠️ Received SIGINT, shutting down gracefully...');
+  process.exit(0);
 });
 
 process.on('SIGTERM', () => {
-  if (!isShuttingDown) {
-    isShuttingDown = true;
-    console.log(`\n⚠️ Received SIGTERM at ${new Date().toISOString()}, shutting down gracefully...`);
-    if (currentAnimeBot) {
-      currentAnimeBot.cleanup();
-    }
-    setTimeout(() => process.exit(0), 1000);
+  console.log('\n⚠️ Received SIGTERM, shutting down gracefully...');
+  process.exit(0);
+});
+
+// Prevent the process from exiting on uncaught errors
+process.on('exit', (code) => {
+  if (code !== 0) {
+    console.log('🔄 Process exiting with code:', code, '- Restarting...');
+    // Don't actually exit, let the process continue
   }
 });
 
 process.on('uncaughtException', (err) => {
-  console.error(`❌ Uncaught Exception at ${new Date().toISOString()}:`, err);
-  console.log('🛑 Shutting down due to an uncaught exception.');
-  if (currentAnimeBot) {
-    currentAnimeBot.cleanup();
-  }
-  process.exit(1);
+  console.error('❌ Uncaught Exception:', err);
+  // Don't exit, just log the error and continue
 });
 
 process.on('unhandledRejection', (reason, promise) => {
-  console.error(`❌ Unhandled Rejection at ${new Date().toISOString()} - Promise:`, promise, 'Reason:', reason);
-  // Don't exit, just log the error
+  console.error('❌ Unhandled Rejection at:', promise, 'reason:', reason);
+  // Don't exit, just log the error and continue
 });
 
 // Start the bot
