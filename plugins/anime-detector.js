@@ -59,9 +59,9 @@ class AnimeCharacterBot {
     }
 
     getAdaptiveDelay(characterCount = 1, isMistake = false, mistakeType = null) {
-        const baseDelay = 650; // Base delay for 1 character (10% faster: 722 * 0.9)
-        const perCharacterDelay = 650; // Each additional character adds this much time (10% faster: 722 * 0.9)
-        const randomVariation = Math.floor(Math.random() * 500); // Random variation
+        const baseDelay = 65; // Base delay for 1 character (10% faster: 722 * 0.9)
+        const perCharacterDelay = 65; // Each additional character adds this much time (10% faster: 722 * 0.9)
+        const randomVariation = Math.floor(Math.random() * 50); // Random variation
         let calculatedDelay = baseDelay + ((characterCount - 1) * perCharacterDelay) + randomVariation;
         
         // If it's a delay mistake, make it much longer
@@ -74,12 +74,12 @@ class AnimeCharacterBot {
 
     // 30% chance of making a mistake in processing
     shouldMakeMistake() {
-        return Math.random() < 0; // 30% chance
+        return Math.random() < 0.3; // 30% chance
     }
 
     // 50% chance of correcting a mistake after a delay
     shouldCorrectMistake() {
-        return Math.random() < 0.5; // 50% chance
+        return Math.random() < 0; // 50% chance
     }
 
     // Generate correction message - simple and direct
@@ -125,7 +125,7 @@ class AnimeCharacterBot {
         const characters = [...originalCharacters];
         
         // 70% chance for typo, 30% chance for other mistakes
-        const isTypo = Math.random() < 0;
+        const isTypo = Math.random() < 0.7;
         
         if (isTypo) {
             // Make a typo in one character based on keyboard proximity

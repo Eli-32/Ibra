@@ -38,7 +38,7 @@ async function cleanupSession() {
     if (fs.existsSync(sessionDir)) {
       const files = fs.readdirSync(sessionDir);
       files.forEach(file => {
-        if (file.endsWith('.json')) {
+        if (file.endsWith('.json') && file !== 'creds.json') {
           const filePath = `${sessionDir}/${file}`;
           const stats = fs.statSync(filePath);
           // Remove files older than 24 hours
