@@ -501,7 +501,11 @@ class WhatsAppAnimeBot {
                     }
                     
                 } catch (error) {
-                    console.error(`❌ Error in message handler:`, error);
+                    if (error.message.includes('decryption')) {
+                        console.warn(`⚠️ Failed to decrypt message, skipping: ${message.key.id}`);
+                    } else {
+                        console.error(`❌ Error in message handler:`, error);
+                    }
                 }
             }
         };

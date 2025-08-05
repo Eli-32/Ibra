@@ -311,9 +311,8 @@ async function startBot() {
           console.log(`🔄 Connection timeout, reconnecting in 3 seconds...`);
           setTimeout(startBot, waitTime);
         } else if (shouldReconnect) {
-          const waitTime = 10000; // 10 seconds for other errors
-          console.log(`🔄 Reconnecting in 10 seconds...`);
-          setTimeout(startBot, waitTime);
+          console.log('🔄 Connection lost, attempting to reconnect...');
+          setTimeout(startBot, 5000);
         } else {
           console.log('🚫 Logged out. Please restart and scan QR code again.');
           process.exit(1);
@@ -388,16 +387,6 @@ async function startBot() {
       }
     });
     
-    // Additional error handling for connection issues
-    sock.ev.on('connection.update', async (update) => {
-      if (update.connection === 'close') {
-        console.log('🔄 Connection lost, attempting to reconnect...');
-        setTimeout(() => {
-          startBot().catch(console.error);
-        }, 5000);
-      }
-    });
-
     // Save credentials when updated
     sock.ev.on('creds.update', saveCreds);
     
@@ -437,14 +426,11 @@ process.on('SIGTERM', () => {
 
 process.on('uncaughtException', (err) => {
   console.error(`❌ Uncaught Exception at ${new Date().toISOString()}:`, err);
-  // Don't exit immediately, try to recover
+  console.log('🛑 Shutting down due to an uncaught exception.');
   if (currentAnimeBot) {
     currentAnimeBot.cleanup();
   }
-  setTimeout(() => {
-    console.log('🔄 Attempting to restart bot after uncaught exception...');
-    startBot().catch(console.error);
-  }, 5000);
+  process.exit(1);
 });
 
 process.on('unhandledRejection', (reason, promise) => {
