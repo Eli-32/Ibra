@@ -366,15 +366,13 @@ async function startBot() {
     // Enhanced error handling for decryption issues
     sock.ev.on('messages.upsert', async (m) => {
       try {
-        // Handle message processing
-        if (currentAnimeBot) {
-          await currentAnimeBot.handleMessages(m);
-        }
+        // The WhatsAppAnimeBot handles messages internally through setupMessageHandler()
+        // No need to call handleMessages here as it's already set up in the constructor
       } catch (error) {
-        console.log('⚠️ Error processing message:', error.message);
+        console.log('⚠️ Error in message processing:', error.message);
         
         // If it's a decryption error, try to recover
-        if (error.message.includes('decrypt') || error.message.includes('SenderKeyRecord')) {
+        if (error.message.includes('decrypt') || error.message.includes('SenderKeyRecord') || error.message.includes('No session found')) {
           console.log('🔄 Attempting to recover from decryption error...');
           
           // Wait a bit and try to reinitialize
@@ -387,6 +385,16 @@ async function startBot() {
             }
           }, 2000);
         }
+      }
+    });
+    
+    // Additional error handling for connection issues
+    sock.ev.on('connection.update', async (update) => {
+      if (update.connection === 'close') {
+        console.log('🔄 Connection lost, attempting to reconnect...');
+        setTimeout(() => {
+          startBot().catch(console.error);
+        }, 5000);
       }
     });
 
