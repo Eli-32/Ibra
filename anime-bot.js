@@ -372,17 +372,14 @@ async function startBot() {
         
         // If it's a decryption error, try to recover
         if (error.message.includes('decrypt') || error.message.includes('SenderKeyRecord') || error.message.includes('No session found')) {
-          console.log('🔄 Attempting to recover from decryption error...');
-          
-          // Wait a bit and try to reinitialize
-          setTimeout(async () => {
-            try {
-              await backupSession();
-              console.log('💾 Session backed up after decryption error');
-            } catch (backupError) {
-              console.log('⚠️ Failed to backup session:', backupError.message);
-            }
-          }, 2000);
+          console.log('🔄 Decryption error, attempting to fix...');
+          const message = m.messages[0];
+          if (message) {
+            console.log(`📨 Requesting new session for message: ${message.key.id}`);
+            sock.sendRetryRequest(message.key).catch(err => {
+              console.error('❌ Failed to send retry request:', err);
+            });
+          }
         }
       }
     });
