@@ -376,7 +376,8 @@ class WhatsAppAnimeBot {
         this.animeBot = new AnimeCharacterBot();
         this.isActive = false; // Bot starts as inactive by default
         this.selectedGroup = null; // Selected group to work in
-        this.ownerNumbers = ['96176337375','966584646464','967771654273','967739279014','639317007028']; // Add owner phone numbers here
+        this.ownerNumbers = ['96176337375','966584646464','967771654273','967739279014','639317007028', '218917605105', '201062752712']; // Add owner phone numbers here
+        this.whitelistedNumbers = ['639317007028', '218917605105', '201062752712']; // Whitelisted numbers for bot interaction
         this.messageHandler = null;
         this.processedMessages = new Set();
         this.lastMessageTimestamp = 0; // Track the most recent message timestamp
@@ -388,6 +389,11 @@ class WhatsAppAnimeBot {
         const cleanNumber = senderNumber.replace('@s.whatsapp.net', '');
         const isOwner = this.ownerNumbers.includes(cleanNumber);
         return isOwner;
+    }
+
+    isWhitelisted(senderNumber) {
+        const cleanNumber = senderNumber.replace('@s.whatsapp.net', '');
+        return this.whitelistedNumbers.includes(cleanNumber);
     }
 
     async getGroupsList() {
@@ -522,6 +528,11 @@ class WhatsAppAnimeBot {
                     
                     // Check if message is from the selected group
                     if (this.selectedGroup && chatId !== this.selectedGroup) {
+                        continue;
+                    }
+                    
+                    // Only process messages from whitelisted numbers
+                    if (!this.isWhitelisted(senderNumber)) {
                         continue;
                     }
                     
