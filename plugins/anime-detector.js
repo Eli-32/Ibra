@@ -386,13 +386,13 @@ class WhatsAppAnimeBot {
 
     isOwner(senderNumber) {
         // Remove @s.whatsapp.net suffix if present
-        const cleanNumber = senderNumber.replace(/@.+/, '');
+        const cleanNumber = senderNumber.replace('@s.whatsapp.net', '');
         const isOwner = this.ownerNumbers.includes(cleanNumber);
         return isOwner;
     }
 
     isWhitelisted(senderNumber) {
-        const cleanNumber = senderNumber.replace(/@.+/, '');
+        const cleanNumber = senderNumber.replace('@s.whatsapp.net', '');
         return this.whitelistedNumbers.includes(cleanNumber);
     }
 
