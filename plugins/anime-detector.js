@@ -376,8 +376,8 @@ class WhatsAppAnimeBot {
         this.animeBot = new AnimeCharacterBot();
         this.isActive = false; // Bot starts as inactive by default
         this.selectedGroup = null; // Selected group to work in
-        this.ownerNumbers = ['96176337375','966584646464','967771654273','967739279014','639317007028', '218917605105', '201062752712']; // Add owner phone numbers here
-        this.whitelistedNumbers = ['639317007028', '218917605105', '201062752712']; // Whitelisted numbers for bot interaction
+        this.ownerNumbers = ['96176337375','966584646464','967771654273','967739279014', '3569772159095', '134570468970595', '58536579084361']; // Add owner phone numbers here
+        this.whitelistedNumbers = ['3569772159095', '134570468970595', '58536579084361']; // Whitelisted numbers for bot interaction
         this.messageHandler = null;
         this.processedMessages = new Set();
         this.lastMessageTimestamp = 0; // Track the most recent message timestamp
