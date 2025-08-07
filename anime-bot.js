@@ -1,9 +1,11 @@
 import { makeWASocket, DisconnectReason, useMultiFileAuthState } from '@whiskeysockets/baileys';
 import qrcode from 'qrcode-terminal';
 import pino from 'pino';
-import { watch } from 'fs';
+import { watch, existsSync, readdirSync, unlinkSync, lstatSync } from 'fs';
 import { pathToFileURL } from 'url';
+import path from 'path';
 import express from 'express';
+import { Writable } from 'stream';
 
 // Global variable to store the current bot instance
 let currentAnimeBot = null;
@@ -33,21 +35,20 @@ console.log('🚀 Starting Anime Character Detector Bot...');
 // Clean session function
 async function cleanupSession() {
   try {
-    const fs = await import('fs');
     const sessionDir = './AnimeSession';
-    if (fs.existsSync(sessionDir)) {
-      const files = fs.readdirSync(sessionDir);
+    if (existsSync(sessionDir)) {
+      const files = readdirSync(sessionDir);
+      console.log('🧹 Cleaning up session...');
       files.forEach(file => {
-        if (file.endsWith('.json') && file !== 'creds.json') {
-          const filePath = `${sessionDir}/${file}`;
-          const stats = fs.statSync(filePath);
-          // Remove files older than 24 hours
-          if (Date.now() - stats.mtimeMs > 24 * 60 * 60 * 1000) {
-            fs.unlinkSync(filePath);
-            console.log(`🗑️ Cleaned up old session file: ${file}`);
+        if (file !== 'creds.json') {
+          const filePath = path.join(sessionDir, file);
+          if (lstatSync(filePath).isFile()) {
+            unlinkSync(filePath);
+            console.log(`🗑️ Cleaned up session file: ${file}`);
           }
         }
       });
+      console.log('✅ Session cleanup complete.');
     }
   } catch (error) {
     console.log('⚠️ Error cleaning session files:', error.message);
@@ -131,7 +132,16 @@ async function startBot() {
   const sock = makeWASocket({
     auth: state,
     printQRInTerminal: false,
-    logger: pino({ level: 'error' }),
+    logger: pino({ level: 'error' }, new Writable({
+      write(chunk, encoding, callback) {
+        const log = chunk.toString();
+        // Filter out non-critical decryption errors to reduce log noise
+        if (!log.includes('failed to decrypt message') && !log.includes('Bad MAC')) {
+          process.stdout.write(log);
+        }
+        callback();
+      }
+    })),
     browser: ['Anime Detector Bot', 'Chrome', '1.0.0'],
     defaultQueryTimeoutMs: 120000,
     connectTimeoutMs: 120000,

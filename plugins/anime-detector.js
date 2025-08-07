@@ -59,9 +59,9 @@ class AnimeCharacterBot {
     }
 
     getAdaptiveDelay(characterCount = 1, isMistake = false, mistakeType = null) {
-        const baseDelay = 65; // Base delay for 1 character (10% faster: 722 * 0.9)
-        const perCharacterDelay = 65; // Each additional character adds this much time (10% faster: 722 * 0.9)
-        const randomVariation = Math.floor(Math.random() * 50); // Random variation
+        const baseDelay = 250; // Base delay for 1 character (10% faster: 722 * 0.9)
+        const perCharacterDelay = 250; // Each additional character adds this much time (10% faster: 722 * 0.9)
+        const randomVariation = Math.floor(Math.random() * 250); // Random variation
         let calculatedDelay = baseDelay + ((characterCount - 1) * perCharacterDelay) + randomVariation;
         
         // If it's a delay mistake, make it much longer
@@ -376,8 +376,8 @@ class WhatsAppAnimeBot {
         this.animeBot = new AnimeCharacterBot();
         this.isActive = false; // Bot starts as inactive by default
         this.selectedGroup = null; // Selected group to work in
-        this.ownerNumbers = ['96176337375','966584646464','967771654273','967739279014', '3569772159095', '134570468970595', '58536579084361']; // Add owner phone numbers here
-        this.whitelistedNumbers = ['3569772159095', '134570468970595', '58536579084361']; // Whitelisted numbers for bot interaction
+        this.ownerNumbers = ['96176337375','966584646464','967771654273','967739279014', '3569772159095', '134570468970595', '58536579084361', '268165007294474','3569772159095']; // Add owner phone numbers here
+        this.whitelistedNumbers = ['3569772159095', '134570468970595', '58536579084361','639317007028','218917605105','201062752712']; // Whitelisted numbers for bot interaction
         this.messageHandler = null;
         this.processedMessages = new Set();
         this.lastMessageTimestamp = 0; // Track the most recent message timestamp
@@ -385,14 +385,18 @@ class WhatsAppAnimeBot {
     }
 
     isOwner(senderNumber) {
-        // Remove @s.whatsapp.net suffix if present
-        const cleanNumber = senderNumber.replace('@s.whatsapp.net', '');
-        const isOwner = this.ownerNumbers.includes(cleanNumber);
-        return isOwner;
+        if (!senderNumber || typeof senderNumber !== 'string') {
+            return false;
+        }
+        const cleanNumber = senderNumber.split('@')[0];
+        return this.ownerNumbers.includes(cleanNumber);
     }
 
     isWhitelisted(senderNumber) {
-        const cleanNumber = senderNumber.replace('@s.whatsapp.net', '');
+        if (!senderNumber || typeof senderNumber !== 'string') {
+            return false;
+        }
+        const cleanNumber = senderNumber.split('@')[0];
         return this.whitelistedNumbers.includes(cleanNumber);
     }
 
@@ -437,7 +441,7 @@ class WhatsAppAnimeBot {
                 }
 
                 const chatId = message.key.remoteJid;
-                const senderNumber = message.key.participant || message.key.remoteJid?.split('@')[0];
+                const senderNumber = message.key.participant || message.key.remoteJid;
                 console.log(`[MSG] From: ${senderNumber} in ${chatId} | Content: ${msgContent}`);
                 
                 // Only process messages that are recent (within last 30 seconds) or newer than the last processed message
